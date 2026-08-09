@@ -1,0 +1,19 @@
+=========================================
+  Baremetal Rust Lab - Environment Info
+=========================================
+**Date:** Sun  9 Aug 2026 18:37:06 WEST
+
+**Operating System:**
+Darwin arm64
+
+**Rust Toolchain:**
+rustc 1.99.0-nightly (771916f90 2026-08-08)
+cargo 1.99.0-nightly (b07e5a086 2026-08-07)
+
+**Emulators:**
+QEMU emulator version 10.0.3
+QEMU emulator version 10.0.3
+
+**Cargo Utilities:**
+bootimage 0.10.5
+=========================================

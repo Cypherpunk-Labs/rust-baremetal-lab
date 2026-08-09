@@ -1,0 +1,9 @@
+[build]
+target = "x86_64-unknown-none"
+
+# Force the compiler to use a static relocation model
+[target.x86_64-unknown-none]
+rustflags = ["-C", "relocation-model=static"]
+
+[target.'cfg(target_os = "none")']
+runner = "bootimage runner"

@@ -1,0 +1,10 @@
+[package]
+name = "model-builder"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+burn = { version = "0.21", features = ["std"] }
+burn-flex = { version = "0.21", features = ["std"] }
+safetensors = "0.8"
+kernel = { path = "../kernel" }

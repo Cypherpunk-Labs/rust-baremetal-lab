@@ -11,7 +11,7 @@ use burn_core::{
     tensor::{Int, Shape, Tensor, TensorData},
 };
 use core::alloc::{GlobalAlloc, Layout};
-use core::arch::global_asm;
+use core::arch::{asm, global_asm};
 use core::cell::UnsafeCell;
 use core::fmt::Write;
 use core::panic::PanicInfo;
@@ -75,6 +75,22 @@ const UART_DR: *mut u32 = UART_BASE as *mut u32;
 const UART_FR: *const u32 = (UART_BASE + 0x18) as *const u32;
 const UART_CR: *mut u32 = (UART_BASE + 0x30) as *mut u32;
 const FR_TXFF: u32 = 1 << 5;
+
+fn cntpct() -> u64 {
+    let mut v: u64 = 0;
+    unsafe {
+        asm!("mrs {0}, cntpct_el0", out(reg) v);
+    }
+    v
+}
+
+fn cntfrq() -> u64 {
+    let mut v: u64 = 0;
+    unsafe {
+        asm!("mrs {0}, cntfrq_el0", out(reg) v);
+    }
+    v
+}
 
 struct Pl011;
 
@@ -146,20 +162,35 @@ pub extern "C" fn kernel_main() -> ! {
     let mut input_ids: Vec<i64> = vec![15496, 11];
 
     writeln!(serial, "[Kernel] Starting autoregressive generation loop (greedy)...").ok();
+    let freq = cntfrq();
+    let mut total_ms: u64 = 0;
 
     for step in 0..10 {
         let seq_len = input_ids.len();
         let data = TensorData::new(input_ids.clone(), Shape::new([1, seq_len]));
         let input_tensor = Tensor::<Backend, 2, Int>::from_data(data, &device);
 
+        let t0 = cntpct();
         let logits = model.forward(input_tensor);
         let last_logits = logits.slice([0..1, seq_len - 1..seq_len]);
         let next_token = last_logits.argmax(2).into_scalar() as i64;
+        let t1 = cntpct();
         input_ids.push(next_token);
 
-        writeln!(serial, "[step {}] token={}", step, next_token).ok();
+        let step_ms = (t1 - t0) * 1000 / freq;
+        total_ms += step_ms;
+        writeln!(serial, "[step {}] token={} ({} ms)", step, next_token, step_ms).ok();
     }
 
+    let tps = (10.0 * 1000.0) / (total_ms as f64);
+    writeln!(
+        serial,
+        "[Kernel] avg {:.2} ms/token, {:.3} tokens/sec (cntfrq={} Hz)",
+        total_ms as f64 / 10.0,
+        tps,
+        freq
+    )
+    .ok();
     writeln!(serial, "[Kernel] Inference test completed successfully").ok();
     loop {}
 }

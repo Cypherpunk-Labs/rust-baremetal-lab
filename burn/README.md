@@ -71,7 +71,7 @@ Cargo runs inside `kernel/` — hence the Makefile `kernel` target does
 | `make run-tcg`        | Boot kernel under TCG emulation (**works end-to-end**, ~13 s/step)          |
 | `make run-hvf`        | Boot kernel under HVF acceleration (**hangs** — known bug, see below)       |
 
-Expected output (host `make validate` and kernel `make run-tcg` agree):
+Expected output (host `make validate` and kernel `make run-tcg` agree on tokens):
 
 ```
 [step 0] token=521
@@ -79,6 +79,23 @@ Expected output (host `make validate` and kernel `make run-tcg` agree):
 ...
 Final tokens: [15496, 11, 521, 397, 397, 397, 397, 397, 397, 397, 397, 397]
 ```
+
+Both paths also print timing/throughput. The kernel reads the ARM generic timer
+(`cntpct_el0` / `cntfrq_el0`) directly — no `std`, no interrupts:
+
+```
+# host (make validate)
+avg 1284.41 ms/token, 0.779 tokens/sec
+
+# kernel (make run-tcg)
+[step 0] token=521 (5742 ms)
+...
+[Kernel] avg 13502.90 ms/token, 0.074 tokens/sec (cntfrq=1000000000 Hz)
+```
+
+TCG costs ~10.5x the native host — expected for pure interpreter-emulation.
+Per-step time grows with `seq_len` (full-causal attention re-runs the whole
+prefix each step).
 
 Manual QEMU invocation (what `make run-tcg` runs):
 

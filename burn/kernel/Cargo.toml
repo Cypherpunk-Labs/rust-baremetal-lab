@@ -1,0 +1,10 @@
+[package]
+name = "kernel"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+burn-core = { version = "0.21", default-features = false }
+burn-nn = { version = "0.21", default-features = false }
+burn-flex = { version = "0.21", default-features = false }
+linked_list_allocator = "0.10"

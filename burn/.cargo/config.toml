@@ -1,0 +1,7 @@
+[target.aarch64-unknown-linux-musl]
+# Statically link the aarch64 Linux `host` binary using the Rust toolchain's
+# bundled rust-lld (no external cross-gcc/lld required), resolved at build time
+# via scripts/aarch64-linux-musl-linker.sh so the config doesn't hardcode a
+# toolchain path. Scoped to this target only; native builds unaffected.
+linker = "scripts/aarch64-linux-musl-linker.sh"
+rustflags = ["-C", "linker-flavor=ld.lld"]

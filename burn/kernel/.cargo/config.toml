@@ -1,0 +1,6 @@
+[unstable]
+build-std = ["core", "alloc"]
+build-std-features = ["compiler-builtins-mem"]
+
+[target.aarch64-unknown-none]
+rustflags = ["-C", "link-arg=-Tlinker.ld"]

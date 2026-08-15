@@ -1,0 +1,23 @@
+#cloud-config
+# Cloud-init user-data for the QEMU/HVF Ubuntu guest that runs the std `host`
+# binary. `bootcmd` runs on EVERY boot (unlike `runcmd`, which is per-instance),
+# so each VM boot re-runs the benchmark. Output is teed to the 9p shared folder
+# (tag=host0) so the host can read the results from guest.log.
+users:
+  - name: ubuntu
+    groups: [sudo, adm]
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    lock_passwd: false
+    plain_text_passwd: ubuntu
+
+disable_root: false
+ssh_pwauth: true
+
+bootcmd:
+  - mkdir -p /host
+  - mount -t 9p -o trans=virtio,version=9p2000.L host0 /host
+  - export HOST_DATA_DIR=/host/smollm
+  - chmod +x /host/smollm/host
+  - /host/smollm/host --bench 1 2>&1 | tee /host/smollm/guest.log
+  - poweroff

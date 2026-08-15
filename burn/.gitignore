@@ -1,0 +1,15 @@
+/target
+**/*.rs.bk
+kernel/src/smollm-135m.bin
+model-builder/model.safetensors
+model-builder/model.safetensors.part
+.DS_Store
+*.log
+kernel/src/tokenizer.bin
+
+# Linux guest artifacts (large / generated)
+model-builder/linux/ubuntu-24.04-server-cloudimg-arm64.img
+model-builder/linux/ubuntu-24.04-server-cloudimg-arm64.img.part
+model-builder/linux/seed.iso
+model-builder/linux/cidata/
+model-builder/linux/share/

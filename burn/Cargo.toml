@@ -1,0 +1,3 @@
+[workspace]
+members = ["kernel", "model-builder", "host"]
+resolver = "2"

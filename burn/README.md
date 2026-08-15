@@ -73,10 +73,15 @@ Cargo runs inside `kernel/` — hence the Makefile `kernel` target does
 | `make kernel`         | Build the no_std aarch64 kernel ELF                                         |
 | `make host`           | Build the standalone **std** comparison binary (`host/`, release)          |
 | `make host-run`       | Run the std binary (greedy benchmark + chat)                                |
+| `make host-linux`     | Cross-compile the std binary to a **static aarch64 Linux ELF** (musl)       |
+| `make linux-image`    | Download the Ubuntu 24.04 ARM64 cloud image (SHA-256 verified)              |
+| `make seed`           | Regenerate the cloud-init NoCloud seed ISO (`model-builder/linux/seed.iso`) |
+| `make run-linux`      | Boot the Ubuntu guest under QEMU/HVF; run the std host binary inside it     |
 | `make run-tcg`        | Boot kernel under TCG emulation (**works**, ~5 s/step with KV cache)   |
 | `make run-hvf`        | Boot kernel under HVF acceleration (**works**, ~0.19 s/step with KV cache) |
 | `make chat`           | Boot under HVF into the interactive chat loop (type a prompt)            |
 | `make bench N=5`      | Sequential perf comparison: run **host** and **kernel** N times, avg TPS  |
+| `make bench-linux N=5`| Perf comparison: run the std host binary **inside the QEMU/Linux guest** N times |
 
 Expected output (host `make validate` and kernel agree on tokens):
 
@@ -180,19 +185,83 @@ with `std` equivalents (`std::time::Instant`, `stdin`).
   boots) and prints the average TPS for each, e.g.:
 
 ```
-=== Host (std) benchmark: 2 runs ===
-[Host] avg TPS over 2 runs: 6.924
+=== Host (std) benchmark: 10 runs ===
+[Host] avg TPS over 10 runs: 7.060
 [Host] Final tokens: [15496, 11, 30, 824, 31, 34, 32, 33, 39, 31, 32, 33]
 
-=== Kernel (HVF) benchmark: 2 runs ===
-  run 1 TPS: 5.043
-  run 2 TPS: 5.105
-  avg TPS over 2 runs: 5.074
+=== Kernel (HVF) benchmark: 10 runs ===
+  run 1 TPS: 5.107
+  ...
+  run 10 TPS: 5.128
+  avg TPS over 10 runs: 5.091
 ```
 
 Both paths must produce the identical token sequence (correctness gate). The
 sampling helpers (`Rng`, `expf`, `sample_token`) are duplicated in `host/src/
 main.rs` (not shared) so the kernel source stays untouched.
+
+---
+
+## Linux guest (std host binary under QEMU/HVF)
+
+To compare **std-under-QEMU** vs **no_std-kernel-under-QEMU** (isolating the
+std-vs-no_std difference, both under HVF), the same `host` binary is
+cross-compiled to a **statically linked aarch64 Linux ELF** and run inside a
+minimal Ubuntu 24.04 guest that QEMU boots with HVF:
+
+- `make host-linux` — `cargo build -p host --release --target
+  aarch64-unknown-linux-musl`. Linking is done with the toolchain's bundled
+  `rust-lld` (resolved by `scripts/aarch64-linux-musl-linker.sh`, so the config
+  has no hardcoded path) — no external cross-gcc required. `.cargo/config.toml`
+  at the workspace root scopes this to the musl target only.
+- `make linux-image` — downloads the official Ubuntu 24.04 ARM64 cloud image
+  (`model-builder/linux/ubuntu-24.04-server-cloudimg-arm64.img`, qcow2, checksum
+  verified by `download-linux-image.sh`). It is UEFI-only, so the boot script
+  attaches QEMU's `edk2-aarch64-code.fd` firmware (`-drive if=pflash`).
+- `make seed` — regenerates the NoCloud cloud-init seed ISO from
+  `model-builder/linux/user-data` + `meta-data`. The user-data runs the
+  benchmark in **`bootcmd`** (runs on *every* boot; `runcmd` is per-instance and
+  would only run once), mounting the 9p share and teeing the host binary's
+  output to the share so the macOS side can read `guest.log`.
+- `make run-linux` / `make bench-linux N=5` — boots the guest under HVF, mounts
+  the 9p shared folder (`model-builder/linux/share/smollm/`, tag `host0`) with
+  the static binary + `.bin` data files, runs `HOST_DATA_DIR=/host/smollm
+  ./host --bench 1`, and powers off. `scripts/run-linux.sh` is the QEMU driver.
+
+```
+=== Host in QEMU/Linux guest benchmark: 10 runs ===
+  run 1 TPS: 3.672
+  ...
+  run 10 TPS: 3.715
+  avg TPS over 10 runs: 3.725
+```
+
+Both paths (native std host and in-guest std host) produce the identical token
+sequence, and the host reads its `.bin` files through `HOST_DATA_DIR` (default
+`kernel/src/`), so the same binary runs natively on macOS and inside the guest.
+
+---
+
+## 3-way performance comparison (10-run averages)
+
+The greedy benchmark (`--bench`) was run 10 times on each of the three paths —
+all on QEMU `virt`/HVF on the same Apple Silicon host, all producing the
+identical token sequence `[15496, 11, 30, 824, 31, 34, 32, 33, 39, 31, 32, 33]`:
+
+| Path | Description | Avg TPS |
+|------|-------------|---------|
+| `./target/release/host` | std binary, native macOS (no QEMU) | **7.06** |
+| kernel ELF under HVF | no_std kernel, QEMU/HVF (`make bench`) | **5.09** |
+| std host in QEMU/Linux | static musl ELF in Ubuntu guest under HVF (`make bench-linux`) | **3.73** |
+
+Interpretation:
+- **std vs no_std** (both bare QEMU/HVF, isolating the code path): the std host
+  in the Linux guest (3.73 TPS) is ~1.4x slower than the no_std kernel
+  (5.09 TPS) — the guest OS (page tables, virtio/9p, etc.) adds overhead vs a
+  kernel that talks straight to the UART.
+- **QEMU/Linux guest vs native** (both std): the same std binary drops from
+  ~7.06 TPS native to ~3.73 TPS in the guest (~1.9x), i.e. roughly half the
+  throughput once it runs under the guest OS rather than directly on macOS.
 
 ---
 
@@ -281,4 +350,8 @@ the investigation.
   differently than `transformers`, though decoded text is identical). All
   normal text (words, single spaces, punctuation, digits) matches the reference
   exactly. Fixing this requires reimplementing the GPT-2 pre-tokenizer regex.
-- `kernel/x86_64-unknown-none.json` is a stale unused custom target — safe to delete.
+- **Linux guest**: **done** — the std host binary cross-compiles to a static
+  aarch64 Linux ELF and runs inside a Ubuntu 24.04 cloud-image guest booted by
+  QEMU/HVF (`make run-linux`, `make bench-linux`). Guest boot takes ~30-60 s
+  (cloud-init + 9p model load); 10-run avg TPS 3.73 vs 7.06 native std and 5.09
+  no_std HVF kernel (see the 3-way comparison table).

@@ -1,0 +1,2 @@
+instance-id: ubuntu-qemu-hvf
+local-hostname: host-vm

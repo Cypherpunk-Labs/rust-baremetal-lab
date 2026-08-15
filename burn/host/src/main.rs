@@ -86,9 +86,18 @@ fn sample_token(logits: &[f32], rng: &mut Rng, temperature: f32, top_k: usize) -
 // Model / tokenizer loading (mirrors kernel startup).
 // ---------------------------------------------------------------------------
 
+/// Resolve the directory holding the `.bin` data files. Defaults to the repo's
+/// `kernel/src/`, but can be overridden with `HOST_DATA_DIR` (e.g. when running
+/// inside a Linux guest where the files live under a 9p mount).
+fn data_dir() -> String {
+    std::env::var("HOST_DATA_DIR")
+        .unwrap_or_else(|_| concat!(env!("CARGO_MANIFEST_DIR"), "/../kernel/src/").to_string())
+}
+
 fn load_bytes(rel: &str) -> &'static [u8] {
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../kernel/src/");
-    let path = format!("{}{}", path, rel);
+    let dir = data_dir();
+    let dir = if dir.ends_with('/') { dir } else { format!("{dir}/") };
+    let path = format!("{dir}{rel}");
     let data = std::fs::read(&path).unwrap_or_else(|e| {
         panic!("failed to read {}: {} (run `make model` / `make tokenizer`?)", path, e)
     });

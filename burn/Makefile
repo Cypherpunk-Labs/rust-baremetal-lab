@@ -3,9 +3,10 @@ SHELL := /bin/bash
 QEMU   := qemu-system-aarch64
 ELF    := target/aarch64-unknown-none/release/kernel
 MEM    := 4G
+N      := 5
 QEMU_COMMON := -machine virt -cpu max -m $(MEM) -serial stdio -display none -kernel $(ELF)
 
-.PHONY: weights model tokenizer validate kernel run-tcg run-hvf chat clean all
+.PHONY: weights model tokenizer validate kernel host run-tcg run-hvf chat bench clean all
 
 all: weights model tokenizer kernel
 
@@ -33,6 +34,14 @@ tokenizer-check:
 kernel:
 	cd kernel && cargo build --release --target aarch64-unknown-none
 
+## host — build the standalone std comparison binary (release)
+host:
+	cargo build -p host --release
+
+## host-run — run the std comparison binary (greedy benchmark + chat)
+host-run: host
+	./target/release/host
+
 ## run-tcg — boot kernel under TCG emulation (works, ~5s per step with KV cache)
 run-tcg: kernel
 	$(QEMU) $(QEMU_COMMON)
@@ -44,6 +53,23 @@ run-hvf: kernel
 ## chat — boot under HVF and enter the interactive chat loop (type a prompt)
 chat: kernel
 	$(QEMU) $(QEMU_COMMON) -cpu max -accel hvf
+
+## bench — sequential performance comparison: run host and kernel N times
+## (default N=5, override with `make bench N=10`) and report average TPS each.
+bench: host kernel
+	@echo "=== Host (std) benchmark: $(N) runs ==="
+	@./target/release/host --bench $(N) 2>&1 | grep -E "avg TPS|Final tokens"
+	@echo ""
+	@echo "=== Kernel (HVF) benchmark: $(N) runs ==="
+	@sum=0; cnt=0; \
+	for i in $$(seq 1 $(N)); do \
+		line=$$(timeout 30 $(QEMU) $(QEMU_COMMON) -cpu max -accel hvf </dev/null 2>&1 | grep -m1 "avg .* tokens/sec"); \
+		v=$$(echo "$$line" | awk '{print $$5}'); \
+		echo "  run $$i TPS: $$v"; \
+		sum=$$(echo "$$sum + $$v" | bc); cnt=$$((cnt+1)); \
+	done; \
+	avg=$$(echo "scale=3; $$sum / $$cnt" | bc); \
+	echo "  avg TPS over $$cnt runs: $$avg"
 
 clean:
 	cd kernel && cargo clean

@@ -71,9 +71,12 @@ Cargo runs inside `kernel/` — hence the Makefile `kernel` target does
 | `make tokenizer-check`| Validate the tokenizer blob against known token ids (host)                  |
 | `make validate`       | Host reference run: prints 10 greedy tokens (~2 s/step)                     |
 | `make kernel`         | Build the no_std aarch64 kernel ELF                                         |
+| `make host`           | Build the standalone **std** comparison binary (`host/`, release)          |
+| `make host-run`       | Run the std binary (greedy benchmark + chat)                                |
 | `make run-tcg`        | Boot kernel under TCG emulation (**works**, ~5 s/step with KV cache)   |
 | `make run-hvf`        | Boot kernel under HVF acceleration (**works**, ~0.19 s/step with KV cache) |
 | `make chat`           | Boot under HVF into the interactive chat loop (type a prompt)            |
+| `make bench N=5`      | Sequential perf comparison: run **host** and **kernel** N times, avg TPS  |
 
 Expected output (host `make validate` and kernel agree on tokens):
 
@@ -156,6 +159,40 @@ The `-cpu max` flag is **required** — the default virt CPU rejects the ELF
   `std`, no `rand`). `make chat` reads a prompt over PL011 RX (with echo and
   backspace), tokenizes, generates up to 64 tokens, decodes and streams output,
   then loops.
+
+---
+
+## Host (std) comparison binary (`host/`)
+
+A standalone `std` crate that reuses the **same** `kernel` library code
+(`kernel::model`, `kernel::tokenizer`) and the **same** `burn_flex::Flex` CPU
+backend to run the identical greedy benchmark and chat loop on the host. This
+lets you compare the no_std kernel (under HVF) against a normal `std` binary
+with zero changes to the kernel sources — the no_std-only parts (UART, custom
+heap, ARM timer, boot asm) live only in `kernel/src/main.rs` and are replaced
+with `std` equivalents (`std::time::Instant`, `stdin`).
+
+- `make host` builds it in release; `make host-run` runs the greedy benchmark
+  then the interactive chat loop (prompt from `stdin`).
+- `./target/release/host --bench N` runs the greedy benchmark N times
+  sequentially and reports the average TPS.
+- `make bench N=5` runs **both** the host binary and the kernel (N QEMU/HVF
+  boots) and prints the average TPS for each, e.g.:
+
+```
+=== Host (std) benchmark: 2 runs ===
+[Host] avg TPS over 2 runs: 6.924
+[Host] Final tokens: [15496, 11, 30, 824, 31, 34, 32, 33, 39, 31, 32, 33]
+
+=== Kernel (HVF) benchmark: 2 runs ===
+  run 1 TPS: 5.043
+  run 2 TPS: 5.105
+  avg TPS over 2 runs: 5.074
+```
+
+Both paths must produce the identical token sequence (correctness gate). The
+sampling helpers (`Rng`, `expf`, `sample_token`) are duplicated in `host/src/
+main.rs` (not shared) so the kernel source stays untouched.
 
 ---
 

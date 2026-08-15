@@ -4,3 +4,4 @@ kernel/src/smollm-135m.bin
 model-builder/model.safetensors
 model-builder/model.safetensors.part
 .DS_Store
+*.log

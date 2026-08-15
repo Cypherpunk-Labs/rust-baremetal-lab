@@ -166,7 +166,7 @@ pub extern "C" fn kernel_main() -> ! {
     serial.init();
 
     unsafe {
-        kernel::mmu::init(&mut serial);
+        kernel::mmu::init();
         (*ALLOCATOR.0.get()).init(HEAP_START as *mut u8, HEAP_SIZE);
     }
 
@@ -176,29 +176,6 @@ pub extern "C" fn kernel_main() -> ! {
         HEAP_SIZE / (1024 * 1024 * 1024)
     )
     .ok();
-
-    // --- MINIMAL ATOMICS PROBE: does a bare ldaxrb/stxrb work under HVF? ---
-    let probe: &mut u8 = unsafe { &mut *(HEAP_START as *mut u8) };
-    *probe = 0;
-    let mut prev: u32;
-    let mut status: u32;
-    unsafe {
-        core::arch::asm!(
-            "ldaxrb {r:w}, [{addr}]",
-            "stlxrb {s:w}, {val:w}, [{addr}]",
-            r = out(reg) prev,
-            s = out(reg) status,
-            addr = in(reg) probe as *mut u8 as usize,
-            val = in(reg) 1u32,
-        );
-    }
-    writeln!(serial, "[Kernel] atomics probe: prev={} status={}", prev, status).ok();
-    if status != 0 {
-        writeln!(serial, "[Kernel] stlxrb FAILED (status != 0) -> atomics broken").ok();
-    } else {
-        writeln!(serial, "[Kernel] stlxrb succeeded -> atomics OK").ok();
-    }
-    // --------------------------------------------------------------------
 
     writeln!(serial, "[Kernel] Loading SmolLM-135M weights from embedded bytes...").ok();
 
@@ -220,24 +197,40 @@ pub extern "C" fn kernel_main() -> ! {
     let model = SmolLmModel::<Backend>::new(&config, &device).load_record(record);
     writeln!(serial, "[Kernel] Model loaded onto burn-flex backend").ok();
 
-    let mut input_ids: Vec<i64> = vec![15496, 11];
+    let mut cache = model.new_cache();
 
-    writeln!(serial, "[Kernel] Starting autoregressive generation loop (greedy)...").ok();
+    writeln!(serial, "[Kernel] Starting autoregressive generation loop (greedy, KV cache)...").ok();
     let freq = cntfrq();
     let mut total_ms: u64 = 0;
 
-    for step in 0..10 {
-        let seq_len = input_ids.len();
-        let data = TensorData::new(input_ids.clone(), Shape::new([1, seq_len]));
+    // Initial prompt: process all prompt tokens, cache their K/V.
+    let prompt: Vec<i64> = vec![15496, 11];
+    let seq_len = prompt.len();
+    let mut next_token: i64;
+    {
+        let data = TensorData::new(prompt.clone(), Shape::new([1, seq_len]));
         let input_tensor = Tensor::<Backend, 2, Int>::from_data(data, &device);
 
         let t0 = cntpct();
-        let logits = model.forward(input_tensor);
+        let logits = model.forward_step(input_tensor, &mut cache);
         let last_logits = logits.slice([0..1, seq_len - 1..seq_len]);
-        let next_token = last_logits.argmax(2).into_scalar() as i64;
+        next_token = last_logits.argmax(2).into_scalar() as i64;
         let t1 = cntpct();
-        input_ids.push(next_token);
+        let step_ms = (t1 - t0) * 1000 / freq;
+        total_ms += step_ms;
+        writeln!(serial, "[step 0] token={} ({} ms)", next_token, step_ms).ok();
+    }
 
+    // Subsequent steps: feed only the previous token; attention reads cached K/V.
+    for step in 1..10 {
+        let data = TensorData::new(vec![next_token], Shape::new([1, 1]));
+        let input_tensor = Tensor::<Backend, 2, Int>::from_data(data, &device);
+
+        let t0 = cntpct();
+        let logits = model.forward_step(input_tensor, &mut cache);
+        let last_logits = logits.slice([0..1, 0..1]);
+        next_token = last_logits.argmax(2).into_scalar() as i64;
+        let t1 = cntpct();
         let step_ms = (t1 - t0) * 1000 / freq;
         total_ms += step_ms;
         writeln!(serial, "[step {}] token={} ({} ms)", step, next_token, step_ms).ok();
@@ -295,11 +288,11 @@ fn ec_name(ec: u64) -> &'static str {
         0x15 => "SVE access trap",
         0x16 => "Trapped ERET/ERETAA/ERETAB",
         0x18 => "PAC exception",
-        0x20 => "Instruction abort (same EL)",
-        0x21 => "Instruction abort (lower EL)",
+        0x20 => "Instruction abort (from lower EL)",
+        0x21 => "Instruction abort (same EL)",
         0x22 => "PC alignment fault",
-        0x24 => "Data abort (same EL)",
-        0x25 => "Data abort (lower EL)",
+        0x24 => "Data abort (from lower EL)",
+        0x25 => "Data abort (same EL)",
         0x26 => "SP alignment fault",
         0x2c => "Trapped FP exception",
         0x34 => "Data cache maintenance (same EL)",

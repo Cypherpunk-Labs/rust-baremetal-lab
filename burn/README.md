@@ -4,13 +4,13 @@ Run [SmolLM-135M](https://huggingface.co/HuggingFaceTB/SmolLM-135M) inference in
 `no_std`, single-core ARM64 kernel built with [Burn](https://burn.dev) 0.21 +
 `burn-flex`, booted as a raw ELF under QEMU `virt` on Apple Silicon.
 
-The kernel has **no OS** — no std, no libc, no MMU. It maps RAM, drives the
-PL011 UART directly, allocates a 2 GiB heap, deserializes the embedded weights,
-and runs a greedy autoregressive generation loop, printing tokens over the serial
-console.
+The kernel has **no OS** — no std, no libc. It enables a minimal identity MMU,
+maps RAM as Normal cacheable memory, drives the PL011 UART directly, allocates a
+2 GiB heap, deserializes the embedded weights, and runs a greedy autoregressive
+generation loop, printing tokens over the serial console.
 
-**This project is a deliberate exercise in running Burn on bare metal.** TCG works
-end-to-end; HVF is blocked by a QEMU bug (details below).
+**This project is a deliberate exercise in running Burn on bare metal.** Both TCG
+and HVF work end-to-end; HVF requires the identity MMU (details below).
 
 ---
 
@@ -29,6 +29,7 @@ burn/
 │   ├── Cargo.toml
 │   └── src/
 │       ├── main.rs       # boot asm, UART, allocator, generation loop
+│       ├── mmu.rs        # identity MMU (required for HVF)
 │       ├── model.rs      # SmolLM-135M architecture (burn-nn)
 │       ├── lib.rs        # shared with model-builder
 │       └── smollm-135m.bin  # embedded weights (gitignored, generated)
@@ -49,7 +50,7 @@ Note the workspace target dir is `burn/target/` (root), so the kernel ELF lands 
 
 - Rust nightly (see `rust-toolchain.toml`; tested with `1.99.0-nightly`)
   with `rustup target add aarch64-unknown-none`
-- `qemu-system-aarch64` (tested with **10.0.3** from Homebrew)
+- `qemu-system-aarch64` (tested with **11.1.0** from Homebrew)
 - A macOS host with Hypervisor.framework (for HVF; not required for TCG)
 
 `aarch64-unknown-none` includes `+neon` and has no soft-float, so Burn/pulp/gemm
@@ -68,10 +69,10 @@ Cargo runs inside `kernel/` — hence the Makefile `kernel` target does
 | `make model`          | Convert safetensors -> `kernel/src/smollm-135m.bin` (runs model-builder)    |
 | `make validate`       | Host reference run: prints 10 greedy tokens (~2 s/step)                     |
 | `make kernel`         | Build the no_std aarch64 kernel ELF                                         |
-| `make run-tcg`        | Boot kernel under TCG emulation (**works end-to-end**, ~19 s/step)          |
-| `make run-hvf`        | Boot kernel under HVF acceleration (**hangs** — known bug, see below)       |
+| `make run-tcg`        | Boot kernel under TCG emulation (**works**, ~5 s/step with KV cache)   |
+| `make run-hvf`        | Boot kernel under HVF acceleration (**works**, ~0.19 s/step with KV cache) |
 
-Expected output (host `make validate` and kernel `make run-tcg` agree on tokens):
+Expected output (host `make validate` and kernel agree on tokens):
 
 ```
 [step 0] token=30
@@ -87,15 +88,20 @@ Both paths also print timing/throughput. The kernel reads the ARM generic timer
 # host (make validate)
 avg 2023.55 ms/token, 0.494 tokens/sec
 
-# kernel (make run-tcg)
-[step 0] token=30 (8388 ms)
+# kernel (make run-hvf)
+[step 0] token=30 (259 ms)
 ...
-[Kernel] avg 19018.70 ms/token, 0.053 tokens/sec (cntfrq=1000000000 Hz)
+[Kernel] avg 203.30 ms/token, 4.919 tokens/sec (cntfrq=24000000 Hz)
+
+# kernel (make run-tcg)
+[step 0] token=30 (15035 ms)
+...
 ```
 
-TCG costs ~9.4x the native host — expected for pure interpreter-emulation.
-Per-step time grows with `seq_len` (full-causal attention re-runs the whole
-prefix each step; no KV cache).
+HVF (native execution) is ~46x faster than TCG and ~6x faster than the host
+reference. With the KV cache, generation is ~O(1) per step: the prompt is
+processed once and later steps feed a single token (~194 ms on HVF vs ~5.4 s on
+TCG) instead of re-running full-causal attention over the whole prefix.
 
 Manual QEMU invocation (what `make run-tcg` runs):
 
@@ -119,8 +125,10 @@ The `-cpu max` flag is **required** — the default virt CPU rejects the ELF
   CPU loops at `0x200`. *This was the original "QEMU hangs during load" bug.*
 - **UART**: PL011 at `0x0900_0000` (`DR` +0x000, `FR` +0x018 bit5 TXFF, `CR` +0x030 = 0x301).
 - **Heap**: `0x7000_0000`, 2 GiB, `linked_list_allocator::Heap` wrapped in an
-  `UnsafeCell` + custom `GlobalAlloc`. **Deliberately no locks/atomics** (single
-  core, no interrupts) — see the HVF story below.
+  `UnsafeCell` + custom `GlobalAlloc` (safe: single core, no interrupts).
+- **MMU**: identity map of the first 16 GiB (`kernel/src/mmu.rs`), Normal WB,
+  AP=`0b00`, TTBR1 mirrors TTBR0, enabled from `kernel_main` before the heap or
+  model code runs. Required so Burn's exclusive atomics work under HVF.
 - **Weights**: `include_bytes!("smollm-135m.bin")` (538,067,477 bytes).
 - `embed_tokens.weight` is `[49152, 576]` and is loaded **without transpose**
   (Burn's `load_embedding`); the model-builder must not transpose it.
@@ -128,8 +136,11 @@ The `-cpu max` flag is **required** — the default virt CPU rejects the ELF
   (`rope_theta=10000`), GQA (9 q-heads / 3 kv-heads, repeat-interleaved), scaled
   dot-product attention with a causal `tril_mask`, and a **tied LM head**
   (`tie_word_embeddings=true`: logits = `hidden @ embed_tokens.weight^T` →
-  `[B, S, 49152]`). Greedy argmax is over the vocab dim. No KV cache (full
-  prefix re-computed each step — the dominant cost).
+  `[B, S, 49152]`). Greedy argmax is over the vocab dim. A **KV cache**
+  (`KvCache` + `forward_step`) caches RoPE'd keys/values per layer; the prompt
+  is processed once and each later step attends over the cached prefix with
+  ~O(1) work. RoPE is applied at insertion time (keys) and at query time with
+  absolute positions.
 
 ---
 
@@ -149,36 +160,44 @@ the investigation.
   correctly.
 - The heap/data path was never the problem.
 
-### 2. HVF hangs on atomics (NOT FIXED, a QEMU bug)
+### 2. HVF data-aborts on exclusive atomics (FIXED via identity MMU)
 
 - Under TCG, everything works (this is why the puzzle was hard: *CPU vs accel
   changes the result*).
-- Under HVF on Apple Silicon, **exclusive-access atomics hang silently**:
-  `compare_exchange_weak` (`ldaxrb`/`stxrb`) and even a single `swap`
-  (`ldxr`/`stxr`) spin forever at 100% CPU. Plain loads/stores are fine.
-- All `-cpu` variants tried (`max`, `host`, `cortex-a72`) and
-  `gic-version=max` hang; `-d int` shows **0 exceptions taken** — it is a spin,
-  not a trap. (Compare QEMU work item #3444: `qatomic_xchg` silently fails under
-  HVF.) No guest-side fix is possible.
-- Consequence: Burn's dependency tree itself uses atomics — `spin`, `ahash`,
-  `once_cell`, `portable-atomic` are all pulled in by `burn-core`/`cubecl`, so
-  HVF hangs during weight deserialization regardless of our allocator. We audited
-  `burn-core`/`burn-tensor`/`burn-nn`/`burn-flex` themselves (atomic-free); the
-  atomics come from their transitive deps.
-- We removed the one atomic we controlled (the allocator's `spinning_top`
-  spinlock → raw `Heap` + `GlobalAlloc`), which got HVF from "no output" to
-  "heap initialized + loading weights", but it still hangs in the load path.
+- Under HVF on Apple Silicon, the first exclusive-access atomic raised a **data
+  abort**: `ESR_EL1=0x96000035` (EC=0x25 Data abort, same-EL; DFSC=0x35
+  "unsupported exclusive or atomic access" — QEMU's term for a faulting
+  exclusive-access instruction HVF has no emulation for), `FAR` pointing at the
+  `ldaxrb` inside `spin::Once`/`cubecl_common::stub::RwLock` lazy init. This is
+  QEMU gitlab **#1611** (HVF has no `ldxr/stxr` fault emulation; the KVM backend
+  does). It was not config-dependent: `-cpu host`/`max`, `gic-version=3` all
+  fault identically.
+- Root cause: our kernel ran with the **MMU off**, so all memory was treated as
+  **Device-attribute**, and Apple hardware does not support exclusive accesses
+  to Device memory. Real OSes boot under HVF because they enable the MMU and run
+  with **Normal cacheable** memory, where exclusive atomics execute natively.
+- Fix: enable a minimal identity MMU (`kernel/src/mmu.rs`) mapping the first
+  16 GiB as Normal Write-Back blocks **before** the allocator/heap/model code
+  runs. Burn's exclusive atomics then work unmodified under HVF.
+- **MMU gotcha (cost us a lot of time):** the block descriptor's AP field must
+  be `0b00` (EL1 RW only). With AP=`0b01` (EL0+EL1 RW), the *first instruction
+  fetch* after `SCTLR_EL1.M` is set aborts with a permission fault
+  (`ESR=0x8600000d`, IFSC=0x0d) because a page writable at EL0 is execute-never
+  at EL1. QEMU's `arm_fi_to_lfsc` maps IFSC `0x0d` to permission-fault level 1
+  (not the "MTE tag check" the ARM table suggests).
+- Note: the 1 GiB identity blocks map the UART/GIC MMIO window as Normal WB too
+  — harmless under QEMU (MMIO is emulated), but real hardware would need
+  Device attributes for MMIO.
 
 ### 3. Workarounds / decisions made
 
-- **TCG is the supported path.** `make run-tcg` boots, loads weights,
-  deserializes, and generates the correct token sequence. Slow (~13 s/step) but
-  correct.
-- **HVF is blocked upstream.** If it ever matters: retest with a newer QEMU
-  (HVF atomics/FFI handling is actively churny — see QEMU release notes and the
-  WFI-halting fixes in 11.0.x), or run a TCG-based path.
-- We explicitly did **not** keep the allocator spinlock; the kernel uses a
-  hand-rolled `UnsafeCell<Heap>` `GlobalAlloc` (safe: single core, IRQs off).
+- **HVF is the supported fast path.** `make run-hvf` boots, loads weights,
+  deserializes, and generates the correct token sequence at ~0.19 s/step (with
+  KV cache).
+- **TCG also works** (~5 s/step with KV cache) and is useful for debugging.
+- The kernel still uses a hand-rolled `UnsafeCell<Heap>` `GlobalAlloc` (safe:
+  single core, IRQs off). Burn's own exclusive atomics (via `spin`/`once_cell`/
+  `ahash` in `burn-core`/`cubecl`) run fine now that memory is Normal.
 
 ### 4. Data pipeline
 
@@ -195,6 +214,11 @@ the investigation.
 
 ## Known Remaining Work
 
-- **HVF boot**: blocked on the QEMU atomics bug (see §2). Re-test when a QEMU
-  release fixes HVF exclusive-access handling.
+- **KV cache**: **done** — `KvCache` + `forward_step` cache RoPE'd K/V per
+  layer; generation is ~O(1) per step (prompt processed once, later steps feed a
+  single token). ~194 ms/step on HVF (was ~324 ms) and ~5.4 s/step on TCG (was
+  ~15 s). Token sequence unchanged.
+- **Chat loop**: the hardcoded input ids `[15496, 11]` are placeholder garbage;
+  real chat needs a GPT-2 byte-level BPE tokenizer (vocab 49152, merges 48900),
+  UART RX, and sampling.
 - `kernel/x86_64-unknown-none.json` is a stale unused custom target — safe to delete.

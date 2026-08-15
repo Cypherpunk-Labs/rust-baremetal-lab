@@ -25,11 +25,11 @@ validate:
 kernel:
 	cd kernel && cargo build --release --target aarch64-unknown-none
 
-## run-tcg — boot kernel under TCG emulation (fully working, ~13s per step)
+## run-tcg — boot kernel under TCG emulation (works, ~5s per step with KV cache)
 run-tcg: kernel
 	$(QEMU) $(QEMU_COMMON)
 
-## run-hvf — boot kernel under HVF acceleration (currently hangs on atomics, see README)
+## run-hvf — boot kernel under HVF acceleration (works via identity MMU, ~0.19s per step with KV cache)
 run-hvf: kernel
 	$(QEMU) $(QEMU_COMMON) -cpu max -accel hvf
 

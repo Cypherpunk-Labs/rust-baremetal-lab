@@ -92,6 +92,57 @@ impl<B: Backend> SmolLmModel<B> {
             .expand([b, self.config.hidden_size, self.config.vocab_size]);
         hidden.matmul(weight)
     }
+
+    pub fn new_cache(&self) -> KvCache<B> {
+        KvCache::new(self.config.num_hidden_layers)
+    }
+
+    /// Autoregressive step with a KV cache. Processes only the new tokens in
+    /// `input_ids` (positions `cache.len()..cache.len()+s`) and appends their
+    /// keys/values to the cache. Returns logits `[b, s, vocab]` for the new
+    /// block; generation picks the last position.
+    pub fn forward_step(&self, input_ids: Tensor<B, 2, Int>, cache: &mut KvCache<B>) -> Tensor<B, 3> {
+        let start_pos = cache.len;
+        let mut hidden = self.embed_tokens.forward(input_ids);
+        let [b, _s, _] = hidden.shape().dims();
+        for (i, layer) in self.layers.iter().enumerate() {
+            let (h, k_all, v_all) = layer.forward_step(
+                hidden,
+                cache.keys[i].as_ref(),
+                cache.values[i].as_ref(),
+                start_pos,
+            );
+            hidden = h;
+            cache.keys[i] = Some(k_all);
+            cache.values[i] = Some(v_all);
+        }
+        cache.len += hidden.shape().dims::<3>()[1];
+        let hidden = self.norm.forward(hidden);
+
+        let weight = self.embed_tokens.weight.val();
+        let weight = weight
+            .transpose()
+            .unsqueeze_dim::<3>(0)
+            .expand([b, self.config.hidden_size, self.config.vocab_size]);
+        hidden.matmul(weight)
+    }
+}
+
+/// Per-layer cached keys/values for autoregressive generation.
+pub struct KvCache<B: Backend> {
+    pub keys: Vec<Option<Tensor<B, 4>>>,
+    pub values: Vec<Option<Tensor<B, 4>>>,
+    pub len: usize,
+}
+
+impl<B: Backend> KvCache<B> {
+    pub fn new(num_layers: usize) -> Self {
+        Self {
+            keys: (0..num_layers).map(|_| None).collect(),
+            values: (0..num_layers).map(|_| None).collect(),
+            len: 0,
+        }
+    }
 }
 
 #[derive(Module, Debug)]
@@ -129,6 +180,27 @@ impl<B: Backend> TransformerBlock<B> {
         let x = self.post_attention_layernorm.forward(x);
         let x = self.mlp.forward(x) + residual;
         x
+    }
+
+    /// Cached forward: attend over cached K/V plus the new block's K/V, then
+    /// continue with the MLP for the new positions only. Returns the new hidden
+    /// state along with the merged keys/values to store back into the cache.
+    pub fn forward_step(
+        &self,
+        x: Tensor<B, 3>,
+        cache_k: Option<&Tensor<B, 4>>,
+        cache_v: Option<&Tensor<B, 4>>,
+        start_pos: usize,
+    ) -> (Tensor<B, 3>, Tensor<B, 4>, Tensor<B, 4>) {
+        let residual = x.clone();
+        let x = self.input_layernorm.forward(x);
+        let (x, k, v) = self.self_attn.forward_step(x, cache_k, cache_v, start_pos);
+        let x = x + residual;
+
+        let residual = x.clone();
+        let x = self.post_attention_layernorm.forward(x);
+        let x = self.mlp.forward(x) + residual;
+        (x, k, v)
     }
 }
 
@@ -176,7 +248,7 @@ impl<B: Backend> Attention<B> {
         }
     }
 
-    fn rope_freqs(&self, seq_len: usize, device: &B::Device) -> (Tensor<B, 2>, Tensor<B, 2>) {
+    fn rope_freqs(&self, start: usize, len: usize, device: &B::Device) -> (Tensor<B, 2>, Tensor<B, 2>) {
         let half = self.head_dim / 2;
 
         // inv_freq[i] = 1 / theta^(2i/head_dim), i in 0..half
@@ -185,11 +257,11 @@ impl<B: Backend> Attention<B> {
         let theta_t = Tensor::<B, 1>::full([half], self.rope_theta as f32, device);
         let inv_freq = theta_t.powf(expo);
 
-        // positions outer product inv_freq -> [seq_len, half]
-        let pos = Tensor::<B, 1, Int>::arange(0..seq_len as i64, device).float();
-        let pos = pos.unsqueeze_dim::<2>(1); // [seq_len, 1]
+        // positions (absolute) outer product inv_freq -> [len, half]
+        let pos = Tensor::<B, 1, Int>::arange(start as i64..(start + len) as i64, device).float();
+        let pos = pos.unsqueeze_dim::<2>(1); // [len, 1]
         let inv_freq = inv_freq.unsqueeze_dim::<2>(0); // [1, half]
-        let freqs = pos.matmul(inv_freq); // [seq_len, half]
+        let freqs = pos.matmul(inv_freq); // [len, half]
 
         (freqs.clone().cos(), freqs.sin())
     }
@@ -240,7 +312,7 @@ impl<B: Backend> Attention<B> {
         let k = k.reshape([b, s, kv_heads, head_dim]);
         let v = v.reshape([b, s, kv_heads, head_dim]);
 
-        let (cos, sin) = self.rope_freqs(s, &device);
+        let (cos, sin) = self.rope_freqs(0, s, &device);
         let q = self.apply_rope(q, &cos, &sin);
         let k = self.apply_rope(k, &cos, &sin);
 
@@ -273,6 +345,82 @@ impl<B: Backend> Attention<B> {
         let out = out.swap_dims(1, 2); // [b, s, heads, hd]
         let out = out.reshape([b, s, heads * head_dim]);
         self.o_proj.forward(out)
+    }
+
+    /// Cached forward. `cache_k`/`cache_v` hold RoPE'd keys/values for absolute
+    /// positions `0..start_pos`. Computes q/k/v for the new block at
+    /// `start_pos..start_pos+s`, appends k/v to the cache, and attends the new
+    /// queries over all cached keys. Returns the output plus the merged
+    /// keys/values to store back into the cache.
+    pub fn forward_step(
+        &self,
+        x: Tensor<B, 3>,
+        cache_k: Option<&Tensor<B, 4>>,
+        cache_v: Option<&Tensor<B, 4>>,
+        start_pos: usize,
+    ) -> (Tensor<B, 3>, Tensor<B, 4>, Tensor<B, 4>) {
+        let [b, s, _] = x.shape().dims();
+        let device = x.device();
+        let head_dim = self.head_dim;
+        let heads = self.num_attention_heads;
+        let kv_heads = self.num_key_value_heads;
+        let group = heads / kv_heads;
+
+        let q = self.q_proj.forward(x.clone());
+        let k = self.k_proj.forward(x.clone());
+        let v = self.v_proj.forward(x);
+
+        let q = q.reshape([b, s, heads, head_dim]);
+        let k = k.reshape([b, s, kv_heads, head_dim]);
+        let v = v.reshape([b, s, kv_heads, head_dim]);
+
+        let (cos, sin) = self.rope_freqs(start_pos, s, &device);
+        let q = self.apply_rope(q, &cos, &sin);
+        let k = self.apply_rope(k, &cos, &sin);
+
+        let cache_len = cache_k.map(|t| t.shape().dims::<4>()[1]).unwrap_or(0);
+        // Caches hold K/V in kv_heads form [b, len, kv_heads, head_dim].
+        let k_all = match cache_k {
+            Some(c) => Tensor::cat(vec![c.clone(), k.clone()], 1),
+            None => k.clone(),
+        };
+        let v_all = match cache_v {
+            Some(c) => Tensor::cat(vec![c.clone(), v.clone()], 1),
+            None => v.clone(),
+        };
+
+        // GQA: repeat k/v heads `group` times for attention -> [b, cache_len+s, heads, head_dim]
+        let k_all_exp = k_all
+            .clone()
+            .unsqueeze_dim::<5>(3)
+            .expand([b, cache_len + s, kv_heads, group, head_dim])
+            .reshape([b, cache_len + s, heads, head_dim]);
+        let v_all_exp = v_all
+            .clone()
+            .unsqueeze_dim::<5>(3)
+            .expand([b, cache_len + s, kv_heads, group, head_dim])
+            .reshape([b, cache_len + s, heads, head_dim]);
+
+        // q [b, heads, s, hd], k_t [b, heads, hd, cache_len+s]
+        let q = q.swap_dims(1, 2);
+        let k_t = k_all_exp.swap_dims(1, 2).swap_dims(2, 3);
+        let v = v_all_exp.swap_dims(1, 2);
+
+        let scores = q.matmul(k_t).div_scalar(isqrt(head_dim) as f32);
+
+        // causal mask: key_pos > query_pos -> -inf; the diagonal offset equals
+        // the cache length so past positions are always attended.
+        let mask = Tensor::<B, 2, Bool>::tril_mask([s, cache_len + s], cache_len as i64, &device);
+        let mask = mask
+            .reshape([1, 1, s, cache_len + s])
+            .expand([b, heads, s, cache_len + s]);
+        let scores = scores.mask_fill(mask, f32::NEG_INFINITY);
+
+        let attn = burn_core::tensor::activation::softmax(scores, 3);
+        let out = attn.matmul(v); // [b, heads, s, hd]
+        let out = out.swap_dims(1, 2); // [b, s, heads, hd]
+        let out = out.reshape([b, s, heads * head_dim]);
+        (self.o_proj.forward(out), k_all, v_all)
     }
 }
 

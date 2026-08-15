@@ -66,18 +66,18 @@ Cargo runs inside `kernel/` — hence the Makefile `kernel` target does
 |-----------------------|-----------------------------------------------------------------------------|
 | `make weights`        | Download SmolLM-135M `model.safetensors` (SHA-256 verified) into `model-builder/` |
 | `make model`          | Convert safetensors -> `kernel/src/smollm-135m.bin` (runs model-builder)    |
-| `make validate`       | Host reference run: prints 10 greedy tokens (~1 s/step)                     |
+| `make validate`       | Host reference run: prints 10 greedy tokens (~2 s/step)                     |
 | `make kernel`         | Build the no_std aarch64 kernel ELF                                         |
-| `make run-tcg`        | Boot kernel under TCG emulation (**works end-to-end**, ~13 s/step)          |
+| `make run-tcg`        | Boot kernel under TCG emulation (**works end-to-end**, ~19 s/step)          |
 | `make run-hvf`        | Boot kernel under HVF acceleration (**hangs** — known bug, see below)       |
 
 Expected output (host `make validate` and kernel `make run-tcg` agree on tokens):
 
 ```
-[step 0] token=521
-[step 1] token=397
+[step 0] token=30
+[step 1] token=824
 ...
-Final tokens: [15496, 11, 521, 397, 397, 397, 397, 397, 397, 397, 397, 397]
+Final tokens: [15496, 11, 30, 824, 31, 34, 32, 33, 39, 31, 32, 33]
 ```
 
 Both paths also print timing/throughput. The kernel reads the ARM generic timer
@@ -85,17 +85,17 @@ Both paths also print timing/throughput. The kernel reads the ARM generic timer
 
 ```
 # host (make validate)
-avg 1284.41 ms/token, 0.779 tokens/sec
+avg 2023.55 ms/token, 0.494 tokens/sec
 
 # kernel (make run-tcg)
-[step 0] token=521 (5742 ms)
+[step 0] token=30 (8388 ms)
 ...
-[Kernel] avg 13502.90 ms/token, 0.074 tokens/sec (cntfrq=1000000000 Hz)
+[Kernel] avg 19018.70 ms/token, 0.053 tokens/sec (cntfrq=1000000000 Hz)
 ```
 
-TCG costs ~10.5x the native host — expected for pure interpreter-emulation.
+TCG costs ~9.4x the native host — expected for pure interpreter-emulation.
 Per-step time grows with `seq_len` (full-causal attention re-runs the whole
-prefix each step).
+prefix each step; no KV cache).
 
 Manual QEMU invocation (what `make run-tcg` runs):
 
@@ -121,9 +121,15 @@ The `-cpu max` flag is **required** — the default virt CPU rejects the ELF
 - **Heap**: `0x7000_0000`, 2 GiB, `linked_list_allocator::Heap` wrapped in an
   `UnsafeCell` + custom `GlobalAlloc`. **Deliberately no locks/atomics** (single
   core, no interrupts) — see the HVF story below.
-- **Weights**: `include_bytes!("smollm-135m.bin")` (538,067,357 bytes).
+- **Weights**: `include_bytes!("smollm-135m.bin")` (538,067,477 bytes).
 - `embed_tokens.weight` is `[49152, 576]` and is loaded **without transpose**
   (Burn's `load_embedding`); the model-builder must not transpose it.
+- **Model**: `SmolLmModel` implements real Llama-style inference — RoPE
+  (`rope_theta=10000`), GQA (9 q-heads / 3 kv-heads, repeat-interleaved), scaled
+  dot-product attention with a causal `tril_mask`, and a **tied LM head**
+  (`tie_word_embeddings=true`: logits = `hidden @ embed_tokens.weight^T` →
+  `[B, S, 49152]`). Greedy argmax is over the vocab dim. No KV cache (full
+  prefix re-computed each step — the dominant cost).
 
 ---
 

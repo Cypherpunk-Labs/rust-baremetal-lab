@@ -30,6 +30,7 @@ SmolLM-135M inference now runs on a bare-metal ARM64 kernel (burn-flex, `no_std`
 | std host, native macOS | 7.06 |
 | no_std kernel, QEMU/HVF | 5.09 |
 | std host in QEMU/Linux guest | 3.73 | 
+| Ollama M2 Pro | eval 338.44 |
 
 
 ---

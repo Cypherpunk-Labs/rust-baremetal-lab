@@ -3939,6 +3939,8 @@ dependencies = [
  "burn-flex",
  "kernel",
  "safetensors 0.8.0",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

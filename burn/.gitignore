@@ -5,3 +5,4 @@ model-builder/model.safetensors
 model-builder/model.safetensors.part
 .DS_Store
 *.log
+kernel/src/tokenizer.bin

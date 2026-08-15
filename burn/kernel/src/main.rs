@@ -16,6 +16,7 @@ use core::cell::UnsafeCell;
 use core::fmt::Write;
 use core::panic::PanicInfo;
 use kernel::model::{SmolLmConfig, SmolLmModel, SmolLmModelRecord};
+use kernel::tokenizer::Tokenizer;
 use linked_list_allocator::Heap;
 
 type Backend = burn_flex::Flex;
@@ -52,6 +53,7 @@ unsafe impl GlobalAlloc for KernelHeap {
 static ALLOCATOR: KernelHeap = kernel_heap();
 
 static MODEL_BYTES: &[u8] = include_bytes!("smollm-135m.bin");
+static TOKENIZER_BYTES: &[u8] = include_bytes!("tokenizer.bin");
 
 global_asm!(
     r#"
@@ -111,6 +113,7 @@ const UART_DR: *mut u32 = UART_BASE as *mut u32;
 const UART_FR: *const u32 = (UART_BASE + 0x18) as *const u32;
 const UART_CR: *mut u32 = (UART_BASE + 0x30) as *mut u32;
 const FR_TXFF: u32 = 1 << 5;
+const FR_RXFE: u32 = 1 << 4;
 
 fn cntpct() -> u64 {
     let mut v: u64 = 0;
@@ -143,6 +146,110 @@ impl Pl011 {
             UART_DR.write_volatile(c as u32);
         }
     }
+
+    /// Blocking read of a single byte (0 = RX FIFO empty).
+    fn getc(&self) -> Option<u8> {
+        unsafe {
+            if UART_FR.read_volatile() & FR_RXFE != 0 {
+                None
+            } else {
+                Some((UART_DR.read_volatile() & 0xFF) as u8)
+            }
+        }
+    }
+}
+
+/// Simple deterministic PRNG (xorshift64*) seeded from the system counter.
+struct Rng(u64);
+impl Rng {
+    fn new() -> Self {
+        Rng(cntpct() | 1)
+    }
+    fn next_u64(&mut self) -> u64 {
+        let mut x = self.0;
+        x ^= x >> 12;
+        x ^= x << 25;
+        x ^= x >> 27;
+        self.0 = x;
+        x.wrapping_mul(0x2545F4914F6CDD1D)
+    }
+    /// Uniform f32 in [0, 1).
+    fn next_f32(&mut self) -> f32 {
+        ((self.next_u64() >> 40) as f32) / (1u64 << 24) as f32
+    }
+}
+
+const VOCAB: usize = 49152;
+
+/// `exp(x)` for no_std (no libm). Taylor series; accurate for |x| < 20 which
+/// covers logit/temperature values in practice.
+fn expf(x: f32) -> f32 {
+    let mut sum = 1.0f32;
+    let mut term = 1.0f32;
+    let mut n = 1.0f32;
+    for _ in 0..14 {
+        term *= x / n;
+        sum += term;
+        n += 1.0;
+    }
+    sum
+}
+
+/// Sample a token from logits with temperature + top-k + categorical sampling.
+/// Returns the sampled token id (a `u32`).
+fn sample_token(logits: &[f32], rng: &mut Rng, temperature: f32, top_k: usize) -> u32 {
+    let t = temperature.max(1e-4);
+    // top-k indices by logit (descending)
+    let mut idx: Vec<usize> = (0..logits.len()).collect();
+    idx.sort_by(|&a, &b| logits[b].partial_cmp(&logits[a]).unwrap());
+    let k = top_k.min(idx.len());
+    let mut probs: Vec<f32> = idx[..k].iter().map(|&i| expf(logits[i] / t)).collect();
+    let sum: f32 = probs.iter().sum();
+    for p in probs.iter_mut() {
+        *p /= sum;
+    }
+    // categorical sample
+    let r = rng.next_f32();
+    let mut acc = 0.0f32;
+    for (j, &p) in probs.iter().enumerate() {
+        acc += p;
+        if r < acc {
+            return idx[j] as u32;
+        }
+    }
+    idx[0] as u32
+}
+
+/// Read a line of text from the UART (terminated by Enter). Echoes typed
+/// characters; supports backspace. Returns an empty Vec on EOF/no input.
+fn read_line(serial: &mut Pl011) -> Vec<u8> {
+    let mut buf: Vec<u8> = Vec::new();
+    loop {
+        if let Some(b) = serial.getc() {
+            match b {
+                b'\r' | b'\n' => {
+                    serial.putc(b'\n');
+                    return buf;
+                }
+                0x7F | 0x08 => {
+                    if let Some(_) = buf.pop() {
+                        serial.putc(0x08);
+                        serial.putc(b' ');
+                        serial.putc(0x08);
+                    }
+                }
+                _ => {
+                    buf.push(b);
+                    serial.putc(b);
+                }
+            }
+        }
+    }
+}
+
+/// Convert raw input bytes to a UTF-8 token string for encoding.
+fn bytes_to_string(bytes: &[u8]) -> alloc::string::String {
+    alloc::string::String::from_utf8_lossy(bytes).into_owned()
 }
 
 impl Write for Pl011 {
@@ -246,7 +353,81 @@ pub extern "C" fn kernel_main() -> ! {
     )
     .ok();
     writeln!(serial, "[Kernel] Inference test completed successfully").ok();
-    loop {}
+
+    // ------------------------------------------------------------------
+    // Chat loop: read a prompt, tokenize, generate (sampling), decode.
+    // ------------------------------------------------------------------
+    let tokenizer = Tokenizer::new(TOKENIZER_BYTES);
+    writeln!(
+        serial,
+        "[Chat] tokenizer ready (vocab={}), enter a prompt and press Enter:",
+        VOCAB
+    )
+    .ok();
+
+    loop {
+        writeln!(serial, "\n[Chat] Prompt> ").ok();
+        let line = read_line(&mut serial);
+        if line.is_empty() {
+            continue;
+        }
+        let text = bytes_to_string(&line);
+        writeln!(serial, "\n[Chat] Encoded {} chars", text.len()).ok();
+        let ids = tokenizer.encode(&text);
+        if ids.is_empty() {
+            writeln!(serial, "[Chat] empty tokenization").ok();
+            continue;
+        }
+        writeln!(serial, "[Chat] {} tokens", ids.len()).ok();
+
+        let mut cache = model.new_cache();
+        let mut all_ids: Vec<i64> = ids.iter().map(|&i| i as i64).collect();
+        let mut next_token: i64;
+        let mut rng = Rng::new();
+        let mut gen_count: u64 = 0;
+
+        // Prompt step: process all prompt tokens, cache K/V, sample first token.
+        {
+            let seq_len = all_ids.len();
+            let data = TensorData::new(all_ids.clone(), Shape::new([1, seq_len]));
+            let input_tensor = Tensor::<Backend, 2, Int>::from_data(data, &device);
+            let logits = model.forward_step(input_tensor, &mut cache);
+            let last = logits.slice([0..1, seq_len - 1..seq_len]);
+            let last_data = last.into_data().to_vec::<f32>().unwrap();
+            next_token = sample_token(&last_data, &mut rng, 0.8, 40) as i64;
+        }
+        writeln!(serial, "[Chat] <|im_start|>").ok();
+        let t0 = cntpct();
+        for _ in 0..64 {
+            // decode the last generated token and print it
+            let piece = tokenizer.decode(&[next_token as u32]);
+            write!(serial, "{}", piece).ok();
+            all_ids.push(next_token);
+            gen_count += 1;
+
+            if next_token == 0 {
+                break; // <|endoftext|>
+            }
+
+            let data = TensorData::new(vec![next_token], Shape::new([1, 1]));
+            let input_tensor = Tensor::<Backend, 2, Int>::from_data(data, &device);
+            let logits = model.forward_step(input_tensor, &mut cache);
+            let last = logits.slice([0..1, 0..1]);
+            let last_data = last.into_data().to_vec::<f32>().unwrap();
+            next_token = sample_token(&last_data, &mut rng, 0.8, 40) as i64;
+        }
+        let t1 = cntpct();
+        let gen_ms = (t1 - t0) * 1000 / freq;
+        let tps = (gen_count as f64 * 1000.0) / (gen_ms as f64);
+        writeln!(
+            serial,
+            "\n[Chat] done ({} tokens, {:.2} ms/token, {:.3} tokens/sec)",
+            all_ids.len(),
+            gen_ms as f64 / gen_count as f64,
+            tps
+        )
+        .ok();
+    }
 }
 
 #[panic_handler]

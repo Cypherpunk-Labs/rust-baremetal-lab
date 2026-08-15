@@ -67,10 +67,13 @@ Cargo runs inside `kernel/` — hence the Makefile `kernel` target does
 |-----------------------|-----------------------------------------------------------------------------|
 | `make weights`        | Download SmolLM-135M `model.safetensors` (SHA-256 verified) into `model-builder/` |
 | `make model`          | Convert safetensors -> `kernel/src/smollm-135m.bin` (runs model-builder)    |
+| `make tokenizer`      | Convert `model-builder/tokenizer.json` -> `kernel/src/tokenizer.bin`        |
+| `make tokenizer-check`| Validate the tokenizer blob against known token ids (host)                  |
 | `make validate`       | Host reference run: prints 10 greedy tokens (~2 s/step)                     |
 | `make kernel`         | Build the no_std aarch64 kernel ELF                                         |
 | `make run-tcg`        | Boot kernel under TCG emulation (**works**, ~5 s/step with KV cache)   |
 | `make run-hvf`        | Boot kernel under HVF acceleration (**works**, ~0.19 s/step with KV cache) |
+| `make chat`           | Boot under HVF into the interactive chat loop (type a prompt)            |
 
 Expected output (host `make validate` and kernel agree on tokens):
 
@@ -141,6 +144,18 @@ The `-cpu max` flag is **required** — the default virt CPU rejects the ELF
   is processed once and each later step attends over the cached prefix with
   ~O(1) work. RoPE is applied at insertion time (keys) and at query time with
   absolute positions.
+- **Tokenizer**: GPT-2 byte-level BPE (`kernel/src/tokenizer.rs`). A host-side
+  `tokenizer-builder` converts `model-builder/tokenizer.json` into a compact
+  binary blob (`kernel/src/tokenizer.bin`, ~1.1 MB) that the no_std kernel
+  decodes at boot: `byte_to_id[256]`, vocab byte-strings, and merge triples
+  (left, right, merged) in rank order. Encode maps input bytes to base byte
+  tokens then repeatedly applies the lowest-rank adjacent merge; decode maps
+  token ids back to bytes. Correct for all normal text.
+- **Sampling / chat**: `main.rs` samples with temperature 0.8 + top-k 40 from
+  a deterministic xorshift64* PRNG seeded from the ARM generic counter (no
+  `std`, no `rand`). `make chat` reads a prompt over PL011 RX (with echo and
+  backspace), tokenizes, generates up to 64 tokens, decodes and streams output,
+  then loops.
 
 ---
 
@@ -218,7 +233,15 @@ the investigation.
   layer; generation is ~O(1) per step (prompt processed once, later steps feed a
   single token). ~194 ms/step on HVF (was ~324 ms) and ~5.4 s/step on TCG (was
   ~15 s). Token sequence unchanged.
-- **Chat loop**: the hardcoded input ids `[15496, 11]` are placeholder garbage;
-  real chat needs a GPT-2 byte-level BPE tokenizer (vocab 49152, merges 48900),
-  UART RX, and sampling.
+- **Chat loop**: **done** — `make chat` boots under HVF into an interactive
+  loop: reads a prompt over UART RX, tokenizes it with a GPT-2 byte-level BPE
+  tokenizer (`kernel/src/tokenizer.rs` + `tokenizer.bin`, vocab 49152 / merges
+  48900), generates with temperature 0.8 + top-k 40 sampling, and decodes the
+  output in real time. The hardcoded `[15496, 11]` prompt is still used by the
+  greedy benchmark (`make run-hvf`) only.
+- **Tokenizer edge case**: the byte-level encoder does not replicate the exact
+  pre-tokenizer split for **consecutive leading spaces** (e.g. `"  x"` tokens
+  differently than `transformers`, though decoded text is identical). All
+  normal text (words, single spaces, punctuation, digits) matches the reference
+  exactly. Fixing this requires reimplementing the GPT-2 pre-tokenizer regex.
 - `kernel/x86_64-unknown-none.json` is a stale unused custom target — safe to delete.

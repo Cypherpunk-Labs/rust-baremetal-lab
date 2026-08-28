@@ -1,0 +1,4 @@
+[Kernel] MMU on; heap via Newlib malloc
+[ggml] mul_mat c0 = 8.000 (status 0)
+[Kernel] model loaded: 272 tensors
+[Kernel] ggml FFI reached; looping

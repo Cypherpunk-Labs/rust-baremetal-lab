@@ -1,0 +1,14 @@
+[package]
+name = "model-data"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# The SmolLM-135M F32 weights, embedded exactly like the Burn kernel embeds
+# its model blob. We point at the already-present safetensors in the `burn`
+# workspace (single source of truth; no second 513 MB copy on disk).
+# Path is relative to THIS file (llamacpp/model-data/src/lib.rs):
+#   ../            -> model-data
+#   ../../         -> llamacpp
+#   ../../../      -> repo root
+[dependencies]

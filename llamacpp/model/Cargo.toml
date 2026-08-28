@@ -1,0 +1,9 @@
+[package]
+name = "model"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+libm = "0.2"
+ggml-sys = { path = "../ggml-sys" }

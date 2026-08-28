@@ -1,0 +1,10 @@
+[package]
+name = "ggml-sys"
+version = "0.1.0"
+edition = "2021"
+links = "ggmlcpu"
+build = "build.rs"
+
+[dependencies]
+
+[build-dependencies]

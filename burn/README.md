@@ -355,3 +355,59 @@ the investigation.
   QEMU/HVF (`make run-linux`, `make bench-linux`). Guest boot takes ~30-60 s
   (cloud-init + 9p model load); 10-run avg TPS 3.73 vs 7.06 native std and 5.09
   no_std HVF kernel (see the 3-way comparison table).
+
+### Performance: 3-7 TPS vs Ollama's 340 TPS (diagnosed, not fixed)
+
+The same SmolLM-135M model under Ollama/llama.cpp reaches ~340 TPS while Burn
+here gets 3-7 TPS. The gap is **~50-90x**, not a single bug, and QEMU is *not*
+the cause (the native macOS std binary also only hits 7.06 TPS). Root causes,
+in impact order, with the source evidence:
+
+1. **Single-threaded GEMM on one core.** Both `kernel/` and `host/` build
+   `burn-flex` with **no `rayon`** (`host/Cargo.toml` enables only `["std"]`;
+   the kernel is `default-features = false`). `matmul_2d_strided`/
+   `matmul_batched_gemm` then always take the single-threaded branch
+   (`get_parallelism` returns `Parallelism::None`, `burn-flex/src/ops/matmul.rs`).
+   llama.cpp uses Metal GPU + all CPU cores.
+2. **The no_std kernel runs a *scalar* GEMM — no NEON.** `burn-flex` pulls
+   `gemm` with `default-features = false, features = ["f16"]`. `gemm` dispatches
+   SIMD via `feature_detected!("neon")`, which under `no_std` degrades to
+   `cfg!(feature = "neon")` = **always false** (`gemm-common/src/lib.rs:70-75`),
+   so the kernel silently falls back to the portable scalar microkernel. With
+   `std` enabled (the host build) the same macro is a real runtime
+   `is_aarch64_feature_detected!` check, so the host gets a NEON microkernel.
+   This alone is the measured host-vs-kernel gap (7.06 vs 5.09 TPS, ~1.4x).
+3. **fp32 weights vs Ollama's Q4 quantization.** The kernel streams ~513 MB of
+   fp32 weights per token; a Q4_K_M GGUF is ~80 MB (~6.4x less memory traffic).
+   Decode is memory-bound once parallelism is available, so this dominates at
+   the top end but is not the binding constraint at single-thread speeds.
+4. **Unfused per-token decode overhead.** `forward_step` (`kernel/src/model.rs`)
+   clones the whole [49152, 576] embedding via `.val()` every step (~113 MB
+   copy/token), recomputes RoPE `cos`/`sin` trig per layer per step, appends the
+   KV cache with `Tensor::cat` (copies the full prefix per layer per step), and
+   materializes `expand`/`swap_dims`/`reshape` temporaries plus a 49152-wide
+   logits/softmax. ~256 MFLOPs/token (30 layers × ~6.6 MFLOPs + tied lm-head
+   576×49152) at ~1.8 GFLOP/s effective ≈ 10% of one M-core's fp32 peak.
+
+Planned optimization work (not started), in TPS-per-effort order:
+
+- **Phase 1 — kernel quick wins (~2x, low risk).** (a) Patch `gemm-common` via
+  `[patch.crates-io]` so the no_std `feature_detected!` returns
+  `cfg!(target_arch = "aarch64")` (NEON is aarch64 baseline) → NEON microkernel,
+  ~1.4x; (b) cache the transposed tied lm-head once instead of `.val()` every
+  step; (c) precompute RoPE `cos`/`sin` tables for all positions once; (d) replace
+  per-step KV `Tensor::cat` with preallocated `[b, max_pos, kv_heads, head_dim]`
+  tensors + `slice_assign`; (e) enable `rayon` on the `host/` build so the
+  lm-head GEMM (28.3M ops ≥ burn-flex's 7M parallel threshold) parallelizes.
+- **Phase 2 — f16 weights (~1.5-2.5x).** Convert weights to f16 in
+  `model-builder` and load as `F16` in the kernel; halves bytes/token and
+  `burn-flex` already dispatches `matmul_gemm::<f16>`. Verify precision on the
+  135M model. Main win is byte-halving (the scalar fp16 path may lack a NEON
+  microkernel under no_std).
+- **Phase 3 — block quantization (~3-6x).** Q8_0/Q4_K quantized GEMM in the
+  kernel — effectively reimplementing llama.cpp's dequant-on-load quant matmul
+  in no_std Rust. Largest effort, largest payoff.
+- **Deferred:** a custom M=1 GEMV bypassing burn-flex matmul (biggest potential
+  single-thread win — the current gemm leaves ~5-10x on the table for M=1 shapes)
+  but it abandons Burn's `Linear`/backend abstraction for decode. Metal/GPU is
+  impossible for the no_std kernel and only relevant to the host path.

@@ -10,9 +10,31 @@ Legend — Recency: **Active** = commits within last 12 months; **Stable** = his
 
 ---
 
+## Contents
+
+- **§1** Project Matrix — 75 verified projects across the six objectives
+- **§2** SWOT Analysis (top 10)
+- **§3** Ranking — rubric, top-20 score table, full ranked list, rank highlights, top-3 justification
+- **§4** Labels
+- **§5** Citations [1]–[78]
+- **§6** Further Research (12 prioritized items, mapped to objectives)
+- **§7** AI-Native OS Research Lineage (papers)
+- **§8** Leads not yet verified / excluded
+- **§9** Answers to inline questions
+
+---
+
 ## 1. Project Matrix
 
-75 verified projects across the six objectives. Rank is overall (rubric in §3). Follow-up sweeps (search dates 2026-08-17; DuckDuckGo SERP review + GitHub API) added **AXIOM**, **LLM OS**, **Zero**, **MicroFlow**, **Fable-OS**, **airox-os/core**, a dedicated **Rust no_std AI OS** pass (**alice-aegis**, **BraiNIXOS**, **gehirn-system**, **claudio-os**, **Nyx**, **gpu-compute-nostd**, **edgedl**, **TrustOS**), the driver-learning sweep (**arceos**, **nvme-nostd**, **rustrial-os**), and a ~100-result GitHub sweep (20 targeted queries, 164 unique hits, 2026-08-17) that surfaced the remaining no_std AI OS cluster (**Squirrel AIOS**, **Noesis-OS**, **MielinOS**), the BitNet b1.58 CPU-engine pair (**r3-engine**, **project-willamette**), and **dumbnet** (no_std NN library); agent-framework noise (IronClaw 12.6k★, Astrid 10.3k★, ~50 "agent OS" clones) was classified to §8 leads. A final arXiv paper sweep (2026-08-17) captured the **AI-native OS research lineage** (ProbeLogits/Elastic Gang/Governed MCP, NVMe-direct KV offload, context demand-paging, tiered memory, ternary CPU kernels) in §7. Scope widened to ~10 years.
+75 verified projects across the six objectives. Rank is overall (rubric in §3).
+
+### Research coverage
+
+- **Follow-up sweeps** (2026-08-17; SERP review + GitHub API) added **AXIOM**, **LLM OS**, **Zero**, **MicroFlow**, **Fable-OS**, and **airox-os/core**.
+- A dedicated **Rust no_std AI OS** pass added **alice-aegis**, **BraiNIXOS**, **gehirn-system**, **claudio-os**, **Nyx**, **gpu-compute-nostd**, **edgedl**, and **TrustOS**.
+- The **driver-learning sweep** added **arceos**, **nvme-nostd**, and **rustrial-os**.
+- A **~100-result GitHub sweep** (20 targeted queries, 164 unique hits, 2026-08-17) surfaced the remaining no_std AI OS cluster (**Squirrel AIOS**, **Noesis-OS**, **MielinOS**), the BitNet b1.58 CPU-engine pair (**r3-engine**, **project-willamette**), and **dumbnet** (no_std NN library); agent-framework noise (IronClaw 12.6k★, Astrid 10.3k★, ~50 "agent OS" clones) was classified to §8 leads.
+- A final **arXiv paper sweep** (2026-08-17) captured the **AI-native OS research lineage** (ProbeLogits / Elastic Gang / Governed MCP, NVMe-direct KV offload, context demand-paging, tiered memory, ternary CPU kernels) in §7. Scope widened to ~10 years.
 
 ### Objective 1 — Rust low-level drivers (PCIe / NVMe / net / GPU)
 
@@ -119,16 +141,23 @@ Legend — Recency: **Active** = commits within last 12 months; **Stable** = his
 | 74 | Contrastive Decoding | https://github.com/XiangLi1999/ContrastiveDecoding | unspecified | Python | 6 | Model | Stable | 3 | 58 |
 | 75 | Self-Consistency | https://arxiv.org/abs/2203.11171 | n/a (paper) | n/a | 6 | Model | Stable | 5 | 60 |
 
-**Matrix notes:**
+### Matrix notes
+
 - vLLM ships first-class Rust code in-tree (`rust/` dir, `rust-toolchain.toml`, `build_rust.sh`) — a rare production Rust path into an LLM serving engine.
-- **Rust no_std AI OS** is now a distinct, well-populated sub-field. The focused GitHub-API pass (2026-08-17, ~100-result sweep) surfaced new kernels beyond the original cluster, split by strategy: (a) *inference in the kernel* — **Zero** (Ring-0, 194.5 tok/s vendor-reported), **alice-aegis** (BitNet b1.58 ternary UEFI unikernel, ~2.80 tok/s measured), **gehirn-system** (pre-alpha), **Noesis-OS** (ARM64 no_std microkernel with on-device inference pipelines); (b) *secure inference serving* — **BraiNIXOS** (capability microkernel, W^X+KPTI); (c) *AI-as-architect kernels* — **Squirrel AIOS** (x86_64 no_std, Limine UEFI+BIOS, GPU-as-cognitive-substrate), **claudio-os** (294 KLOC agent OS), **Nyx** (quantum+AI), **MielinOS** (distributed-AI-agent microkernel, WASM sandbox, live migration); (d) *agent OSes (cloud)* — **Fable-OS**, **LLM OS**. Only Zero and alice-aegis actually execute CPU-only inference on bare metal. None is mature (>2 stars).
-- Driver-learning sweep added pure-Rust OS/driver references: **arceos** (779-star modular unikernel — the closest "our platform" archetype), **nvme-nostd** (no_std NVMe 1.4 over PCI BAR0 MMIO), **gpu-compute-nostd** (no_std NVIDIA GPU compute driver with tensor ops — fills the no_std GPU gap), **rustrial-os** (RTL8139 NIC + TCP/IP stack), and **TrustOS** (48★, 264 KLOC bare-metal Rust, zero C, validated AMD GPU SDMA on real hardware).
+- **Rust no_std AI OS** is now a distinct, well-populated sub-field. The focused GitHub-API pass (2026-08-17, ~100-result sweep) surfaced new kernels beyond the original cluster, split by strategy:
+  - *(a) Inference in the kernel* — **Zero** (Ring-0, 194.5 tok/s vendor-reported), **alice-aegis** (BitNet b1.58 ternary UEFI unikernel, ~2.80 tok/s measured), **gehirn-system** (pre-alpha), **Noesis-OS** (ARM64 no_std microkernel with on-device inference pipelines);
+  - *(b) Secure inference serving* — **BraiNIXOS** (capability microkernel, W^X+KPTI);
+  - *(c) AI-as-architect kernels* — **Squirrel AIOS** (x86_64 no_std, Limine UEFI+BIOS, GPU-as-cognitive-substrate), **claudio-os** (294 KLOC agent OS), **Nyx** (quantum+AI), **MielinOS** (distributed-AI-agent microkernel, WASM sandbox, live migration);
+  - *(d) Agent OSes (cloud)* — **Fable-OS**, **LLM OS**.
+  Only **Zero** and **alice-aegis** actually execute CPU-only inference on bare metal. None is mature (>2 stars).
+- **Driver-learning sweep** added pure-Rust OS/driver references: **arceos** (779-star modular unikernel — the closest "our platform" archetype), **nvme-nostd** (no_std NVMe 1.4 over PCI BAR0 MMIO), **gpu-compute-nostd** (no_std NVIDIA GPU compute driver with tensor ops — fills the no_std GPU gap), **rustrial-os** (RTL8139 NIC + TCP/IP stack), and **TrustOS** (48★, 264 KLOC bare-metal Rust, zero C, validated AMD GPU SDMA on real hardware).
 - The author **suhteevah** maintains the most complete no_std AI-driver stack found: `nvme-nostd`, `gpu-compute-nostd`, and the `claudio-os` agent kernel.
 - MicroFlow is the oldest inclusion (~2022–24): a compiler-based Rust TinyML engine with static + page-based memory allocation for 2 kB-RAM 8-bit MCUs.
 - FlexGen renamed to FlexLLMGen, archived 2024-12 (read-only); kept for historical significance.
 - The ~100-result GitHub sweep (20 queries, 164 unique hits, 2026-08-17) shows the query surface for "rust ai os" is dominated by **agent-framework noise** (~50 repos: IronClaw 12.6k★, Astrid 10.3k★, AgentOS/runtime clones like bbarit, rustyhand, feros, LoopForge, broomva's *arcan/lago/praxis* family, openfang-cn localizations, etc.) and **"AI-native Linux distros"** (ZethraOS, NuraOS, AuraOS, aulinx, HakOS, LivingOS, Jarvis-OS…) that wrap Linux/systemd with agents — none are bare-metal Rust kernels, so they are classified in §8, not the matrix. The true no_std AI OSes only surface via OSdev/arXiv/crate-specific queries.
 - **No license detected** for KVQuant, AXIOM, Fable-OS, **Squirrel AIOS** (README badge says MIT, GitHub API returns none), **r3-engine**, and **dumbnet** — flag for licensing review before reuse. Zero is AGPL-3.0-or-later (dual-licensed; commercial license separate).
-- DuckDuckGo (2026-08-17, main site, query "rust ai os", saved SERP reviewed): the top-10 results are **KnoxOS** (marketing site + docs-only repo), **OpenFang** (two marketing domains, "Agent OS, Rust-powered"), **Kernex** (Rust agent *runtime*, not an OS), **airox-os/core** (added to matrix), **Rig** (8290★ Rust LLM-agent framework), plus non-project hits (ZDNet article, rust4ai.com, Rust Foundation position statement). **Notable:** none of the top-10 are the bare-metal LLM kernels in this matrix (Zero, MerlionOS, NIGHTRUN…) — the phrase "rust ai os" is captured by marketing/agent-framework sites, which is why the hobby bare-metal cluster only surfaces via OSdev/arXiv/crate queries. DDG's `html.duckduckgo.com` endpoint (queried earlier) showed no exact-phrase hits and then CAPTCHA-blocked further automated queries.
+- SERP review (2026-08-17, main site, query "rust ai os"): the top-10 results are **KnoxOS** (marketing site + docs-only repo), **OpenFang** (two marketing domains, "Agent OS, Rust-powered"), **Kernex** (Rust agent *runtime*, not an OS), **airox-os/core** (added to matrix), **Rig** (8290★ Rust LLM-agent framework), plus non-project hits (ZDNet article, rust4ai.com, Rust Foundation position statement).
+  - **Notable:** none of the top-10 are the bare-metal LLM kernels in this matrix (Zero, MerlionOS, NIGHTRUN…) — the phrase "rust ai os" is captured by marketing/agent-framework sites, which is why the hobby bare-metal cluster only surfaces via OSdev/arXiv/crate queries.
 
 ---
 
@@ -245,11 +274,79 @@ Legend — Recency: **Active** = commits within last 12 months; **Stable** = his
 | 19 | Zero | 10.0 (30) | 9.0 (18) | 7.0 (10.5) | 3.0 (4.5) | 10.0 (10) | 8.0 (8) | **81.0** |
 | 20 | lele | 9.0 (27) | 8.0 (16) | 8.0 (12) | 6.0 (9) | 9.0 (9) | 7.0 (7) | **80.0** |
 
-Full ranked list (ranks 21–75, total score): burn 79.5 · DeepSeek-V3 79.5 · irqlevel/nos 79.0 · RAG 79.0 · MicroFlow 78.5 · **Squirrel AIOS 78.0** · **Noesis-OS 78.0** · AWQ 78.0 · ReAct 78.0 · Medusa 77.5 · Nova 77.5 · arceos 77.5 · BraiNIXOS 77.5 · RunIT_Mac 77.0 · MXFP8 77.0 · pulp-transformer (FWSA) 77.0 · SelfCheckGPT 76.5 · AXIOM 76.0 · tinygrad 76.0 · Speculative Decoding 75.5 · Test-Time Compute 75.5 · gpu-compute-nostd 75.5 · Lookahead 75.0 · AIOS 74.5 · Wanda 74.0 · rnvme 74.0 · vhost-device-gpu 73.5 · Apple AGX 73.5 · Ollama 73.5 · SparseGPT 73.0 · **MielinOS 72.5** · ToT 72.5 · Nyx 71.5 · **r3-engine 71.5** · nvme-nostd 71.0 · **project-willamette 70.5** · CoT 70.5 · Contrastive Decoding 70.0 · KVQuant 69.0 · Self-Consistency 69.0 · TrustOS 69.0 · rustrial-os 68.5 · nvme_driver 68.0 · claudio-os 67.5 · edgedl 67.5 · e1000-driver 66.0 · LLM OS 65.5 · pci-driver 64.5 · pci-rs 63.5 · gehirn-system 63.5 · FlexGen 62.0 · airox-os/core 59.5 · **dumbnet 59.5** · Fable-OS 59.0 · PunkGo 57.0.
+### 3.3 Full ranked list (ranks 21–75)
 
-> **Zero (rank 19, 81.0)** and **alice-aegis (rank 17, 82.5)** remain the two most on-target projects for our spike: bare-metal Rust unikernels running CPU-only LLM inference (Zero: Ring-0 Qwen3-1.7B at 194.5 tok/s, vendor-reported; alice-aegis: BitNet b1.58 ternary, ~2.80 tok/s single-thread, per-claim hardware logs, bit-exact integer semantics). Both rank below the big engines only on maturity (0–1 stars, single authors). **Squirrel AIOS (rank 26, 78.0)** is the most explicit "AI-as-kernel-principal" design (no_std x86_64, Limine UEFI+BIOS, GPU-as-cognitive-substrate); **Noesis-OS (rank 27, 78.0)** is the strongest *no_std edge-AI microkernel* (ARM64, instant boot, lock-free IPC, virtio, microVM packaging). **MicroFlow (rank 25, 78.5)** is the strongest no_std AI-inference reference for 2 kB-RAM MCUs; **r3-engine (rank 54, 71.5)** and **project-willamette (rank 56, 70.5)** are the newest pure-Rust CPU-only BitNet b1.58 engines (AVX-512 zero-copy; NEON on Pentium-M-class hardware). **BraiNIXOS (rank 33, 77.5)** is the strongest security-first no_std microkernel for serving inference. **arceos (rank 32, 77.5)** is the most credible Rust OS platform. **gpu-compute-nostd (rank 42, 75.5)** fills the no_std GPU-compute gap. **nvme-nostd (rank 55, 71.0)** and **rustrial-os (rank 62, 68.5)** are the best pure-Rust driver references. **Fable-OS (rank 74, 59.0)** is a real 314-star agentic kernel but its inference is a remote Anthropic API — lowest practical relevance to bare-metal local AI; **airox-os/core (rank 72, 59.5)** is a real Rust kernel whose AI subsystem is only a stub.
+| Rank | Project | Total |
+|------|---------|-------|
+| 21 | burn | 79.5 |
+| 22 | DeepSeek-V3 | 79.5 |
+| 23 | irqlevel/nos | 79.0 |
+| 24 | RAG | 79.0 |
+| 25 | MicroFlow | 78.5 |
+| 26 | Squirrel AIOS | 78.0 |
+| 27 | Noesis-OS | 78.0 |
+| 28 | AWQ | 78.0 |
+| 29 | ReAct | 78.0 |
+| 30 | Medusa | 77.5 |
+| 31 | Nova | 77.5 |
+| 32 | arceos | 77.5 |
+| 33 | BraiNIXOS | 77.5 |
+| 34 | RunIT_Mac | 77.0 |
+| 35 | MXFP8 | 77.0 |
+| 36 | pulp-transformer (FWSA) | 77.0 |
+| 37 | SelfCheckGPT | 76.5 |
+| 38 | AXIOM | 76.0 |
+| 39 | tinygrad | 76.0 |
+| 40 | Speculative Decoding | 75.5 |
+| 41 | Test-Time Compute | 75.5 |
+| 42 | gpu-compute-nostd | 75.5 |
+| 43 | Lookahead | 75.0 |
+| 44 | AIOS | 74.5 |
+| 45 | Wanda | 74.0 |
+| 46 | rnvme | 74.0 |
+| 47 | vhost-device-gpu | 73.5 |
+| 48 | Apple AGX | 73.5 |
+| 49 | Ollama | 73.5 |
+| 50 | SparseGPT | 73.0 |
+| 51 | MielinOS | 72.5 |
+| 52 | ToT | 72.5 |
+| 53 | Nyx | 71.5 |
+| 54 | r3-engine | 71.5 |
+| 55 | nvme-nostd | 71.0 |
+| 56 | project-willamette | 70.5 |
+| 57 | CoT | 70.5 |
+| 58 | Contrastive Decoding | 70.0 |
+| 59 | KVQuant | 69.0 |
+| 60 | Self-Consistency | 69.0 |
+| 61 | TrustOS | 69.0 |
+| 62 | rustrial-os | 68.5 |
+| 63 | nvme_driver | 68.0 |
+| 64 | claudio-os | 67.5 |
+| 65 | edgedl | 67.5 |
+| 66 | e1000-driver | 66.0 |
+| 67 | LLM OS | 65.5 |
+| 68 | pci-driver | 64.5 |
+| 69 | pci-rs | 63.5 |
+| 70 | gehirn-system | 63.5 |
+| 71 | FlexGen | 62.0 |
+| 72 | airox-os/core | 59.5 |
+| 73 | dumbnet | 59.5 |
+| 74 | Fable-OS | 59.0 |
+| 75 | PunkGo | 57.0 |
 
-### 3.3 Justification for top 3
+### 3.4 Rank highlights
+
+- **Most on-target for our spike** — **Zero (rank 19, 81.0)** and **alice-aegis (rank 17, 82.5)**: bare-metal Rust unikernels running CPU-only LLM inference (Zero: Ring-0 Qwen3-1.7B at 194.5 tok/s, vendor-reported; alice-aegis: BitNet b1.58 ternary, ~2.80 tok/s single-thread, per-claim hardware logs, bit-exact integer semantics). Both rank below the big engines only on maturity (0–1 stars, single authors).
+- **AI-as-kernel-principal** — **Squirrel AIOS (rank 26, 78.0)**: the most explicit design (no_std x86_64, Limine UEFI+BIOS, GPU-as-cognitive-substrate).
+- **Edge-AI microkernel** — **Noesis-OS (rank 27, 78.0)**: the strongest *no_std edge-AI microkernel* (ARM64, instant boot, lock-free IPC, virtio, microVM packaging).
+- **TinyML reference** — **MicroFlow (rank 25, 78.5)**: the strongest no_std AI-inference reference for 2 kB-RAM MCUs.
+- **Newest BitNet b1.58 engines** — **r3-engine (rank 54, 71.5)** and **project-willamette (rank 56, 70.5)**: pure-Rust CPU-only engines (AVX-512 zero-copy; NEON on Pentium-M-class hardware).
+- **Security-first serving** — **BraiNIXOS (rank 33, 77.5)**: the strongest security-first no_std microkernel for serving inference.
+- **Platform** — **arceos (rank 32, 77.5)**: the most credible Rust OS platform.
+- **Drivers** — **gpu-compute-nostd (rank 42, 75.5)** fills the no_std GPU-compute gap; **nvme-nostd (rank 55, 71.0)** and **rustrial-os (rank 62, 68.5)** are the best pure-Rust driver references.
+- **Lowest practical relevance** — **Fable-OS (rank 74, 59.0)**: a real 314-star agentic kernel but its inference is a remote Anthropic API; **airox-os/core (rank 72, 59.5)**: a real Rust kernel whose AI subsystem is only a stub.
+
+### 3.5 Justification for top 3
 
 1. **vLLM / PagedAttention (92.0).** Highest combined maturity (production, 89.3k stars) and relevance across objectives 3/5/6. Its paged KV-cache is a memory-management blueprint directly portable to a Rust no_std allocator, and the project already proves Rust has a place in production LLM serving internals.
 2. **BitNet b1.58 / bitnet.cpp (90.0).** The strongest evidence "beyond 4-bit" is achievable today: ternary models run ~100B-scale on a single CPU at human-reading speed, MIT-licensed, with LUT kernels whose techniques transfer directly to a Rust engine.
@@ -456,13 +553,12 @@ The consensus across all five themes: an AI-native OS manages **three address sp
 
 ## 8. Leads not yet verified / excluded
 
+### 8.1 Unverifiable / vaporware (no public, verifiable code)
+
 - **"NeuMIPS":** no verifiable project/paper with this name in the LLM-deployment context. Closest verified match for the intended idea (MCU/memory-efficient transformer deployment) is **pulp-transformer / FWSA** [8].
 - **Folkering OS** (merknu/folkering-os): heavily indexed as an "AI-native bare-metal Rust OS" (Qwen3 + VirtIO GPU); a detailed Zing forum write-up (2026-04) corroborates the description, but the GitHub repo still returns 404 — existence of public code unconfirmed.
-- **KnoxOS** (knoxos.com / github.com/knoxos/docs): marketed as an "AI-native OS in Rust" (cognition loop, Linux ABI emulation). Top hit on the DDG "rust ai os" SERP; now confirmed to have a **docs-only** repo (AGPL-3.0, 1 star, README + LICENSE only, pushed once 2026-04) — no code exists publicly; still excluded as vaporware.
+- **KnoxOS** (knoxos.com / github.com/knoxos/docs): marketed as an "AI-native OS in Rust" (cognition loop, Linux ABI emulation). Top hit on the "rust ai os" SERP; now confirmed to have a **docs-only** repo (AGPL-3.0, 1 star, README + LICENSE only, pushed once 2026-04) — no code exists publicly; still excluded as vaporware.
 - **OpenFang** (openfang.sh / openfang.cc): "Agent Operating System", "Production-Grade Agent OS | Rust-Powered, 24/7 Autonomous"; two marketing domains, no repo found — vaporware lead.
-- **Kernex** (kernex.dev, kernex-dev/kernex): real Rust *agent runtime* (v0.10.0, Apache-2.0/MIT, OS-level sandboxing via Seatbelt/Landlock, SQLite memory) — but runs on macOS/Linux, not a custom kernel; architectural interest only for the agent layer.
-- **Rig** (rig.rs, 0xPlaygrounds/rig): 8.3k-star Rust LLM-agent framework — not an OS; architectural interest only.
-- **rust4ai.com** and the **Rust Foundation position statement** ("Rust and AI"): non-project context from the DDG SERP; no action.
 - **AetherOS-Showcase** (danielforface): bare-metal AI OS whose core engine is private ("IP / stealth phase"); only architectural docs are public — partial.
 - **Genasys** (stephendulaney.substack.com, 2026-01): "bare-metal OS with multi-agent orchestration"; described only in a Substack post, no repo found.
 - **Helix OS** (helix-wiki.com): modular Rust kernel claiming an "NEXUS: 812K lines of intelligence" subsystem; marketing site, no repo — looks AI-generated; excluded.
@@ -470,26 +566,35 @@ The consensus across all five themes: an AI-native OS manages **three address sp
 - **unillm** (cognisoc): modular Rust LLM runtime claiming 47 model architectures; only 2 stars, claims rest on the vendor's own blog — unverified.
 - **JC-OS** (discussed on users.rust-lang.org): described as a kernel project embedding LLM primitives; no public repo located on GitHub search — unverified.
 - **Ariel-ML** (arXiv:2512.09800): "AI-arithmetic-in-the-OS" instruction-level LLM arithmetic proposals; paper only, no code — unverified, flagged for citation completeness.
-- **ntoskrnl-rs** (Claude Fable 5): a Windows kernel in Rust written BY an LLM — notable but not an AI OS; excluded.
 - **PunkGo repo:** arXiv:2602.20214 says "open-source" but the URL is not resolvable; included on paper evidence only.
 - **nvme-oxide:** indexed as a bare-metal no_std NVMe driver; crates.io and lib.rs now 404 (yanked).
 - **paiml/pepita:** "tiny Rust Linux kernel for Sovereign AI" — README internally inconsistent (claims kernel yet uses Linux io_uring/ublk); excluded.
+- **Nexus agentic-core-os** (Nexus-Agentic, 0★, MIT) and **LahraCore-OS** (anabkl, 1★, MIT): bare-metal agent-microkernel visions ("Architectural Alpha" / "Foundational Boilerplate") with no implementation — vaporware leads.
+- **skeg:** "RAM-frugal vector engine for Apple Silicon" for local RAG (r/LocalLLM, 2026-05); repo not verified this session — potential Obj-6 storage layer lead.
+- **Bare-metal Rust BitNet engine (Reddit r/LocalLLM, 2026-05):** author-reported 66.8 tok/s BitNet 1.58b 4B on an RTX 3050 (4 GB VRAM), built from scratch to beat llama.cpp's abstraction overhead; no repo identified — methodology lead only (matches Zero's thesis: format-specific hand-optimized engines beat general frameworks).
+- **GPTQ / RTN / EAGLE / MatFormer:** named in scope but not individually verified this session — flagged for citation completeness.
+
+### 8.2 Verified, but not matrix candidates (architectural interest only)
+
+- **Kernex** (kernex.dev, kernex-dev/kernex): real Rust *agent runtime* (v0.10.0, Apache-2.0/MIT, OS-level sandboxing via Seatbelt/Landlock, SQLite memory) — but runs on macOS/Linux, not a custom kernel; architectural interest only for the agent layer.
+- **Rig** (rig.rs, 0xPlaygrounds/rig): 8.3k-star Rust LLM-agent framework — not an OS; architectural interest only.
+- **ntoskrnl-rs** (Claude Fable 5): a Windows kernel in Rust written BY an LLM — notable but not an AI OS; excluded.
 - **thesnmc/ZYO:** RL-optimized Linux CPU scheduler (sched_ext/eBPF) with a Rust LLM orchestrator — runs on Linux 6.12+, not a custom kernel; architectural interest only.
 - **JARVIS OS:** Arch-Linux-based LLM-security research distro, not bare-metal; architectural interest only.
 - **Theseus OS / Redox OS:** both actively checked — **no AI/ML features found**; don't conflate "Theseus AI" (blockchain) with Theseus OS.
 - **rust-raspberrypi-OS-tutorials:** verified — no AI/ML demos exist.
 - **MOROS / SafaOS / CharlotteOS / Maestro / DragonOS / octox / motor-os:** general-purpose Rust hobby/real OSes surfaced by the driver-learning sweep (OSHub roundup + comments); driver-relevant (PCI/net/storage) but **no AI/ML features** — excluded from the matrix; see §6 item 1 for the strongest driver references instead.
-- **~100-result sweep (2026-08-17) — agent-framework noise bucket (~50 repos, mostly Rust, 0–159★):** IronClaw [56] (12.6k★, nearai, userland "secure personal AI assistant"), Astrid [56] (10.3k★, capability-secure general OS, not AI), bbarit-agent-oss, ginkida/rustyhand, ferosai/feros, GridWork-dev/gridwork, ghostapp-ai/ghost, hongmaple0820/maple-os, lucidos-dev/lucidos, rexleimo/LoopForge, Jokerautowrite/chuang-agent, k8nstantin/superx, broomva/* (arcan, lago, praxis, anima, autonom, spaces, haima, nous, vigil, arcan-os), dward1502/Arda*, WAHIB-EL-KHADIRI/AgentOS, o-kadam/bareclaw, Vivien83/captain, AA-Box/little-monkey, Tamang4607/rustyhand, etc. All are agent runtimes/orchestrators on top of a host OS — **architectural interest only, not matrix candidates.**
-- **~100-result sweep — "AI-native Linux distro" bucket:** ZethraOS, NuraOS (YASSERRMD), AuraOS (venkatyarl), MohaMehrzad/aiOS, aulinx, Bantu-Os, AntonioBurgos91/aurum-os, nikhilkumarpanigrahi/nikhil-os, ajul8866/neuraos, TanujBairwa/NeuroOS, snowphn/HakOS, kluth/jarvis-os, RobertKodes/LivingOS, xolerc/xoleric, WolfurX/hearth-os, jboero/asterkube (Asterinas-based k8s). All wrap Linux/systemd/Arch with agents — **not bare-metal; excluded.**
 - **SomaOS** (avsribhas-svg, 10★, MIT): "AI-native OS" with a real dual-interface agent desktop and a `soma-substrate` crate enforcing orientation-aligned AI-safety properties — but it is a **Buildroot minimal-Linux image**, not a custom kernel; architectural lead for the safety-substrate pattern.
-- **Nexus agentic-core-os** (Nexus-Agentic, 0★, MIT) and **LahraCore-OS** (anabkl, 1★, MIT): bare-metal agent-microkernel visions ("Architectural Alpha" / "Foundational Boilerplate") with no implementation — vaporware leads.
 - **5AM-OS** (Hari0701, 1★, MIT): x86_64 Rust **teaching** kernel whose shell explains live CPU state — self-narrating but **no AI/ML**; educational lead.
 - **OxideLM** (MickyBalladelli, 0★, MIT/Apache-2.0): from-scratch pure-Rust Transformer stack (BPE, reverse-mode autograd, wgpu kernels, AdamW) — "bare-metal" here means *no PyTorch*, not no_std; engine/reference lead.
 - **lmzuccarelli/rust-ai-unikernel-\*** (8 repos, 0★): simple unikernel *services* wrapping cloud APIs (grok/anthropic/openai/gemini/auth) + a Rust LLM-Council port — shows unikernel-As-a-cloud-client pattern, no local inference.
 - **1.58-bit / ternary engine cluster (non-Rust or unverified, 2026):** BitMamba-2 + bitmamba.cpp (Zhayr1), Atomic-1Bit (guirguispierre), ternary-zero (skyhighbg22-jpg), vivekdixit3911 ESP32-S3 CNN, vitorengers/esp32-trm-bitnet, TernixEngine, edge-quantized-bitnet, tzervas/ternary-inference-rs (claimed Rust, repo is Python) — C++/Python/C engines supporting the BitNet thesis; Rust relevance limited; §6 item 2 covers the Rust angle.
-- **skeg:** "RAM-frugal vector engine for Apple Silicon" for local RAG (r/LocalLLM, 2026-05); repo not verified this session — potential Obj-6 storage layer lead.
-- **Bare-metal Rust BitNet engine (Reddit r/LocalLLM, 2026-05):** author-reported 66.8 tok/s BitNet 1.58b 4B on an RTX 3050 (4 GB VRAM), built from scratch to beat llama.cpp's abstraction overhead; no repo identified — methodology lead only (matches Zero's thesis: format-specific hand-optimized engines beat general frameworks).
-- **GPTQ / RTN / EAGLE / MatFormer:** named in scope but not individually verified this session — flagged for citation completeness.
+- **rust4ai.com** and the **Rust Foundation position statement** ("Rust and AI"): non-project context from the SERP; no action.
+
+### 8.3 Sweep noise buckets (classified out of the matrix)
+
+- **Agent-framework noise bucket (~50 repos, mostly Rust, 0–159★):** IronClaw [56] (12.6k★, nearai, userland "secure personal AI assistant"), Astrid [56] (10.3k★, capability-secure general OS, not AI), bbarit-agent-oss, ginkida/rustyhand, ferosai/feros, GridWork-dev/gridwork, ghostapp-ai/ghost, hongmaple0820/maple-os, lucidos-dev/lucidos, rexleimo/LoopForge, Jokerautowrite/chuang-agent, k8nstantin/superx, broomva/* (arcan, lago, praxis, anima, autonom, spaces, haima, nous, vigil, arcan-os), dward1502/Arda*, WAHIB-EL-KHADIRI/AgentOS, o-kadam/bareclaw, Vivien83/captain, AA-Box/little-monkey, Tamang4607/rustyhand, etc. All are agent runtimes/orchestrators on top of a host OS — **architectural interest only, not matrix candidates.**
+- **"AI-native Linux distro" bucket:** ZethraOS, NuraOS (YASSERRMD), AuraOS (venkatyarl), MohaMehrzad/aiOS, aulinx, Bantu-Os, AntonioBurgos91/aurum-os, nikhilkumarpanigrahi/nikhil-os, ajul8866/neuraos, TanujBairwa/NeuroOS, snowphn/HakOS, kluth/jarvis-os, RobertKodes/LivingOS, xolerc/xoleric, WolfurX/hearth-os, jboero/asterkube (Asterinas-based k8s). All wrap Linux/systemd/Arch with agents — **not bare-metal; excluded.**
 
 ---
 

@@ -57,6 +57,43 @@ fn main() {
     unsafe { ggml_free(ctx) };
     println!("[harness] OK");
 
+    // --- ggml rope identity-at-pos-0 check -------------------------------
+    unsafe {
+        let ctx = ggml_sys::ggml_init(ggml_sys::ggml_init_params {
+            mem_size: 1 << 20,
+            mem_buffer: std::ptr::null_mut(),
+            no_alloc: false,
+        });
+        let a = ggml_sys::ggml_new_tensor_3d(ctx, ggml_sys::ggml_type::F32, 4, 1, 2);
+        let d = ggml_sys::ggml_get_data_f32(a);
+        for i in 0..8 {
+            *d.add(i) = i as f32;
+        }
+        let pos = ggml_sys::ggml_new_tensor_1d(ctx, ggml_sys::ggml_type::I32, 2);
+        let p = ggml_sys::ggml_get_data(pos) as *mut i32;
+        *p.add(0) = 0;
+        *p.add(1) = 1;
+        for mode in [2i32, 0] {
+            let out = ggml_sys::ggml_rope(ctx, a, pos, 4, mode);
+            let gf = ggml_sys::ggml_new_graph(ctx);
+            ggml_sys::ggml_build_forward_expand(gf, out);
+            ggml_sys::ggml_graph_compute_with_ctx(ctx, gf, 1);
+            let o = ggml_sys::ggml_get_data_f32(out);
+            println!(
+                "[rope] mode={} pos0 (expect 0,1,2,3) = [{}, {}, {}, {}] | pos1 = [{}, {}, {}, {}]",
+                mode,
+                *o.add(0),
+                *o.add(1),
+                *o.add(2),
+                *o.add(3),
+                *o.add(4),
+                *o.add(5),
+                *o.add(6),
+                *o.add(7)
+            );
+        }
+    }
+
     // --- model load (embedded) + safetensors parse validation -----------
     println!("[harness] embedded model: {} bytes", MODEL_BYTES.len());
     let st = SafeTensors::parse(MODEL_BYTES).expect("parse safetensors");
@@ -95,16 +132,27 @@ fn main() {
     // --- transformer forward (host validation) ----------------------------
     println!("[harness] building Model (copying weights into ggml)...");
     let model = unsafe { model::forward::Model::new(&w) };
+
+    // Layer-0 diagnostic: sanity check the ggml attention path produces
+    // finite, non-trivial values (deep parity lives in the `parity` tests).
+    unsafe {
+        let d0 = model.layer0_diag(0, 1).expect("layer0_diag");
+        let max_o = d0.o.iter().fold(f32::NEG_INFINITY, |m, v| m.max(*v));
+        let max_s = d0.scores.iter().fold(f32::NEG_INFINITY, |m, v| m.max(*v));
+        println!(
+            "[harness] layer0 diag: o[0..5]={:?} .. max_o={:.4} max_scores={:.4}",
+            &d0.o[0..5], max_o, max_s
+        );
+        assert!(d0.o.len() == cfg.hidden_size * 2);
+    }
     // Fixed, deterministic token ids for a smoke test + reference comparison.
     let prompt: Vec<i32> = (0..16).map(|i| (i * 7 % cfg.vocab_size as i32)).collect();
     println!("[harness] forward over {} tokens...", prompt.len());
     let logits = unsafe { model.forward(&prompt) };
-    let next = unsafe { model.argmax_last(logits, prompt.len(), cfg.vocab_size) };
+    let next = model::forward::Model::argmax_last(&logits, prompt.len(), cfg.vocab_size);
     // Sanity: logits must be finite.
-    let data = unsafe { ggml_sys::ggml_get_data_f32(logits) };
     let mut finite = true;
-    for i in 0..(prompt.len() * cfg.vocab_size) {
-        let v = unsafe { *data.add(i) };
+    for &v in logits.iter() {
         if !v.is_finite() {
             finite = false;
             break;
@@ -115,21 +163,5 @@ fn main() {
         finite, next
     );
     assert!(finite, "forward produced non-finite logits");
-
-    // Dump logits ([vocab, seq]) for reference comparison (build/ggml_logits.bin).
-    let seq = prompt.len();
-    let vocab = cfg.vocab_size;
-    use std::io::Write;
-    let mut buf: Vec<u8> = Vec::with_capacity(8 + seq * vocab * 4);
-    buf.extend_from_slice(&(seq as i32).to_le_bytes());
-    buf.extend_from_slice(&(vocab as i32).to_le_bytes());
-    for j in 0..seq {
-        let base = unsafe { data.add(j * vocab) };
-        for i in 0..vocab {
-            buf.extend_from_slice(&unsafe { *base.add(i) }.to_le_bytes());
-        }
-    }
-    std::fs::write("build/ggml_logits.bin", &buf).expect("write ggml_logits.bin");
-    println!("[harness] wrote build/ggml_logits.bin ({})", buf.len());
     println!("[harness] FORWARD VALIDATED");
 }

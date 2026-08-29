@@ -108,6 +108,45 @@ impl Write for Serial {
     }
 }
 
+const UART_FR_RXFE: u32 = 1 << 4; // receive FIFO empty
+
+/// Blocking read of one byte from the PL011 UART.
+unsafe extern "C" fn uart_getc_c() -> u8 {
+    while UART_FR.read_volatile() & UART_FR_RXFE != 0 {}
+    UART_DR.read_volatile() as u8
+}
+
+/// Read a line from the UART (until LF/CR or Ctrl-D) into a String, echoing.
+fn read_line() -> alloc::string::String {
+    let mut s = alloc::string::String::new();
+    loop {
+        let c = unsafe { uart_getc_c() };
+        match c {
+            b'\r' | b'\n' => {
+                let _ = writeln!(Serial, "");
+                break;
+            }
+            b'\x04' => break, // Ctrl-D
+            0x7f | 0x08 => {
+                // backspace
+                if !s.is_empty() {
+                    s.pop();
+                    unsafe {
+                        uart_putc_c(0x08u8 as c_char);
+                        uart_putc_c(b' ' as c_char);
+                        uart_putc_c(0x08u8 as c_char);
+                    }
+                }
+            }
+            _ => {
+                s.push(c as char);
+                unsafe { uart_putc_c(c as c_char) };
+            }
+        }
+    }
+    s
+}
+
 /// Minimal f32 -> decimal formatter (no libm). Good enough for diag output.
 fn print_f32(v: f32) -> alloc::string::String {
     if v < 0.0 {
@@ -172,18 +211,50 @@ pub extern "C" fn kernel_main() -> ! {
     // T1: first ggml call through the freestanding FFI.
     unsafe { ggml_hello() };
 
-    // Load the embedded SmolLM-135M weights and parse the safetensors buffer.
-    match model::safetensors::SafeTensors::parse(model_data::MODEL_BYTES) {
-        Ok(st) => {
-            writeln!(Serial, "[Kernel] model loaded: {} tensors", st.len()).ok();
-        }
+    // --- SmolLM-135M on-device chat loop -----------------------------------
+    let tok = kernel::tokenizer::Tokenizer::new(model_data::TOKENIZER_BYTES);
+    let weights = match model::safetensors::SafeTensors::parse(model_data::MODEL_BYTES) {
+        Ok(st) => st,
         Err(e) => {
             writeln!(Serial, "[Kernel] model parse FAILED: {}", e).ok();
+            loop {}
         }
-    }
+    };
+    let w = model::SmolLmWeights::from_safetensors(&weights, model::SmolLmConfig::DEFAULT);
+    let model = unsafe { model::forward::Model::new(&w) };
+    let vocab = model::SmolLmConfig::DEFAULT.vocab_size;
 
-    writeln!(Serial, "[Kernel] ggml FFI reached; looping").ok();
-    loop {}
+    writeln!(Serial, "[Kernel] SmolLM-135M ready. Type a prompt, Ctrl-D to exit.").ok();
+
+    const MAX_NEW: usize = 48;
+    let mut history: alloc::vec::Vec<i32> = alloc::vec::Vec::new();
+    loop {
+        write!(Serial, "You> ").ok();
+        let line = read_line();
+        if line.is_empty() {
+            continue;
+        }
+        // Encode the new user turn and append to the running history.
+        let ids: alloc::vec::Vec<i32> =
+            tok.encode(&line).iter().map(|&x| x as i32).collect();
+        history.extend_from_slice(&ids);
+
+        // Greedy-decode up to MAX_NEW tokens, taking argmax of the last position.
+        write!(Serial, "Bot> ").ok();
+        let mut generated = 0usize;
+        loop {
+            let logits = unsafe { model.forward(&history) };
+            let next = model::forward::Model::argmax_last(&logits, history.len(), vocab);
+            history.push(next as i32);
+            let piece = tok.decode(&[next as u32]);
+            write!(Serial, "{}", piece).ok();
+            generated += 1;
+            if generated >= MAX_NEW || piece.contains('\n') {
+                break;
+            }
+        }
+        writeln!(Serial, "").ok();
+    }
 }
 
 #[panic_handler]

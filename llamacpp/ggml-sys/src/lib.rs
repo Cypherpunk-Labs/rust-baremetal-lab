@@ -136,6 +136,11 @@ extern "C" {
     );
 
     pub fn ggml_new_graph(ctx: *mut ggml_context) -> *mut ggml_cgraph;
+    pub fn ggml_new_graph_custom(
+        ctx: *mut ggml_context,
+        size: usize,
+        grads: bool,
+    ) -> *mut ggml_cgraph;
     pub fn ggml_build_forward_expand(gf: *mut ggml_cgraph, tensor: *mut ggml_tensor);
     // NOTE: do NOT bind `ggml_graph_plan`/`ggml_graph_compute` directly - they
     // return/pass `struct ggml_cplan` by value (a 56-byte struct), whose sret
@@ -170,7 +175,6 @@ extern "C" {
     pub fn ggml_rms_norm(
         ctx: *mut ggml_context,
         a: *mut ggml_tensor,
-        weight: *mut ggml_tensor,
         eps: f32,
     ) -> *mut ggml_tensor;
     pub fn ggml_reshape_3d(
@@ -208,6 +212,14 @@ extern "C" {
         s: f32,
     ) -> *mut ggml_tensor;
     pub fn ggml_soft_max(ctx: *mut ggml_context, a: *mut ggml_tensor) -> *mut ggml_tensor;
+    /// Set elements above the diagonal to -INF (causal mask). With scores
+    /// `[ne0=key, ne1=query, ne2=head]` and n_past=0 it zeroes key > query,
+    /// so each query attends only to keys at positions <= its own.
+    pub fn ggml_diag_mask_inf(
+        ctx: *mut ggml_context,
+        a: *mut ggml_tensor,
+        n_past: c_int,
+    ) -> *mut ggml_tensor;
     pub fn ggml_silu(ctx: *mut ggml_context, a: *mut ggml_tensor) -> *mut ggml_tensor;
     pub fn ggml_mul(
         ctx: *mut ggml_context,

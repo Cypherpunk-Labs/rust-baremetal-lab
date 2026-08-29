@@ -46,3 +46,12 @@ version = "0.1.0"
 [[package]]
 name = "os-api"
 version = "0.1.0"
+
+[[package]]
+name = "parity"
+version = "0.1.0"
+dependencies = [
+ "ggml-sys",
+ "model",
+ "model-data",
+]

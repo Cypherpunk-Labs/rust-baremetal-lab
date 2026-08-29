@@ -1,0 +1,18 @@
+[package]
+name = "kernel"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ggml-sys = { path = "../ggml-sys" }
+os-api = { path = "../os-api" }
+model = { path = "../model" }
+model-data = { path = "../model-data" }
+
+[profile.dev]
+opt-level = 2
+panic = "abort"
+
+[profile.release]
+opt-level = 3
+panic = "abort"

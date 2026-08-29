@@ -17,11 +17,24 @@ This guide walks through creating freestanding `#![no_std]` Rust kernels for bot
 
 # Running a small language model 
 
-SmolLM-135M inference now runs on a bare-metal ARM64 kernel (burn-flex, `no_std`) with a KV cache, UART chat loop, and a GPT-2 BPE tokenizer, plus a std `host` comparison binary and a QEMU/Linux-guest variant.
+Two complete bare-metal SmolLM-135M engines live in this repo:
 
-[Current docs & usage](burn/README.md)
+- **[`llamacpp/` — ggml compute engine (recommended)](llamacpp/README.md)** — Burn's
+  compute layer replaced with a freestanding `ggml` CPU backend driven from Rust over a
+  narrow FFI seam (Strategy A from `research/spike02/report.md`). Verified end-to-end:
+  host parity tests pass, and the `aarch64-unknown-none` kernel boots in QEMU and chats:
+  `The capital of France is` → *" Paris. It is the largest city in France and the second
+  largest in the world...."* No Python, no host OS.
+- **[`burn/` — burn-flex engine (baseline)](burn/README.md)** — the original
+  `no_std` kernel (KV cache, UART chat loop, GPT-2 BPE) plus a std `host` comparison
+  binary and a QEMU/Linux-guest variant.
 
-[Full Context Handover Plan](burn/rust_slm_full_context_plan.md) 
+### Required toolchain
+
+Arm GNU Toolchain (`aarch64-none-elf` + Newlib/libstdc++) for the kernel build, Rust
+nightly with `rust-src` + `build-std`, and QEMU. See `llamacpp/Makefile` / `burn/`.
+
+### Performance notes (burn-flex baseline; fp32)
 
 3-way performance comparison (10-run averages):
 
@@ -31,6 +44,20 @@ SmolLM-135M inference now runs on a bare-metal ARM64 kernel (burn-flex, `no_std`
 | no_std kernel, QEMU/HVF | 5.09 |
 | std host in QEMU/Linux guest | 3.73 |
 | Ollama M2 Pro | 338.44 |
+
+ggml introduces the quantized-kernel path this baseline is moving toward; the immediate
+goal was correctness parity, which is now proven.
+
+### How the ggml path was validated
+
+- `llamacpp/parity/tests/`: `layer0_parity` (intermediates to ~1e-6), `full_logits_parity`
+  (maxdiff ~2e-4, argmax 16/16), `first_token_matches_burn` (matches the burn kernel's
+  token `7042`/" Paris").
+- Generation smoke test and a live QEMU chat run.
+- The critical bug found & fixed: attention `values` was reshaped to `[hidden, seq]`
+  without a true transpose (ggml reshape does not relayout memory), scrambling heads/tokens
+  and silently corrupting logits. `permute(0,2,1,3)` + `cont` fixed it. Full story in
+  `llamacpp/bugs.md`.
 
 
 ---

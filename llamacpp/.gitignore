@@ -1,0 +1,6 @@
+# Scratch space for throwaway experiments / large failed experiments (bugs.md rule C).
+# Never commit anything here.
+scratch/
+
+# Generated build artifacts (serial logs, debug dumps, model copies). Not source.
+build/

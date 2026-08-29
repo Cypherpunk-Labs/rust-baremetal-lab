@@ -1,0 +1,18 @@
+[workspace]
+resolver = "2"
+members = [
+    "ggml-sys",
+    "os-api",
+    "model-data",
+    "model",
+    "harness",
+    "kernel",
+    "parity",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+
+# Path to the vendored llama.cpp/ggml subtree (git submodule under llamacpp/).
+# build.rs derives the source list from here.

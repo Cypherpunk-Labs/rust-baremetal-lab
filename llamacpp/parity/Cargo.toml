@@ -1,0 +1,10 @@
+[package]
+name = "parity"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+model = { path = "../model" }
+model-data = { path = "../model-data" }
+ggml-sys = { path = "../ggml-sys" }

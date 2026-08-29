@@ -1,0 +1,9 @@
+[package]
+name = "harness"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ggml-sys = { path = "../ggml-sys" }
+model = { path = "../model" }
+model-data = { path = "../model-data" }
